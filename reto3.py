@@ -4,6 +4,45 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 import random
 import heapq
+import socket
+import json
+
+"""
+Traffic Simulation with Unity Integration
+
+This script provides a comprehensive traffic simulation with the ability to send data to Unity for visualization.
+
+Features:
+- Node-based road network with A* pathfinding
+- Traffic lights with cycling groups
+- Yield behaviors at merge points
+- Weighted destination spawning
+- Real-time JSON data export for Unity integration
+
+Unity Integration:
+- Use run_simulation_and_send_json() to run simulation and send complete data to Unity
+- Use send_current_simulation_state_to_unity(model) for real-time state updates
+- Use run_simulation_and_save_json() to save data without sending to Unity
+- Data includes: car positions, states, spawn/target nodes, traffic light groups, and network topology
+
+JSON Data Structure:
+{
+    "time": simulation_step,
+    "active_group": current_traffic_light_group,
+    "cars": [
+        {
+            "id": car_index,
+            "x": position_x,
+            "y": position_y,
+            "state": "moving"|"arrived",
+            "spawn_node": starting_node_id,
+            "target_node": destination_node_id
+        }
+    ]
+}
+"""
+
+# Simulation parameters
 
 # Simulation parameters
 params = {
@@ -260,14 +299,14 @@ class RoadNetwork:
         self.add_node("5_17", 5 * scale, 17 * scale, "intersection")
         self.add_node("4_16", 4 * scale, 16 * scale, "intersection")
 
-        self.add_node("2_14", -2 * scale, 14 * scale, "spawn")
+        self.add_node("-2_14", -2 * scale, 14 * scale, "spawn")
         self.add_node("0_14", 0 * scale, 14 * scale, "intersection")
         self.add_node("2_14", 2 * scale, 14 * scale, "intersection")
         self.add_node("4_14", 4 * scale, 14 * scale, "intersection")
         self.add_node("6_14", 6 * scale, 14 * scale, "intersection", group_id=1)
         self.add_node("8_14", 8 * scale, 14 * scale, "intersection")
 
-        self.add_node("2_12", -2 * scale, 12 * scale, "spawn")
+        self.add_node("-2_12", -2 * scale, 12 * scale, "spawn")
         self.add_node("0_12", 0 * scale, 12 * scale, "intersection")
         self.add_node("2_12", 2 * scale, 12 * scale, "intersection")
         self.add_node("4_12", 4 * scale, 12 * scale, "intersection")
@@ -404,12 +443,12 @@ class RoadNetwork:
             # User requested connections
             ("7_19", "5_17"),
             ("5_17", "4_16"),
-            ("2_14", "0_14"),
+            ("-2_14", "0_14"),
             ("0_14", "2_14"),
             ("2_14", "4_14"),
             ("4_14", "6_14"),
             ("6_14", "8_14"),
-            ("2_12", "0_12"),
+            ("-2_12", "0_12"),
             ("0_12", "2_12"),
             ("2_12", "4_12"),
             ("4_12", "6_12"),
@@ -489,8 +528,8 @@ class TrafficModel(ap.Model):
 
         # Spawn-destination restrictions mapping with percentages
         self.spawn_destinations = {
-            "2_14": {"18_26": 1.0},
-            "2_12": {"6_3": 41, "8_2": 116, "26_12": 67},
+            "-2_14": {"18_26": 1.0},
+            "-2_12": {"6_3": 41, "8_2": 116, "26_12": 67},
             "8_26": {"2_16": 280, "18_26": 236, "6_3": 164, "8_2": 49, "26_12": 35},
             "18_2": {"8_2": 214, "18_26": 68, "2_16": 622, "6_3": 34},
             "22_4": {"26_12": 1.0},
@@ -790,6 +829,7 @@ def get_simulation_data(model):
     """Extract current simulation state for Unity"""
     data = {
         "step": model.t,
+        "active_group": model.active_group,  # Current traffic light group
         "cars": [],
         "nodes": {},
         "stats": {
@@ -803,7 +843,7 @@ def get_simulation_data(model):
     for i, car in enumerate(model.cars):
         data["cars"].append(
             {
-                "id": i,
+                "id": car.id,  # Use persistent car ID from agentpy
                 "x": float(car.position[0]),
                 "y": float(car.position[1]),
                 "state": car.state,
@@ -850,10 +890,214 @@ if __name__ == "__main__":
     # Run the simulation
 
     # To save as GIF (uncomment the line below):
-    anim.save("Traffic.gif", writer="pillow", fps=5)
+    # anim.save("Traffic.gif", writer="pillow", fps=5)
 
     # Print some sample data for Unity integration
     # print("\nSample data structure for Unity:")
     # print(f"Number of nodes: {len(data['nodes'])}")
     # print(f"Sample car data: {data['cars'][:2] if data['cars'] else 'No cars active'}")
     # print(f"Sample node data: {list(data['nodes'].items())[:2]}")
+
+
+def run_simulation():
+    """Ejecuta la simulación y genera el JSON para Unity"""
+    frames = []
+    model = TrafficModel(params)
+    model.setup()
+
+    for t in range(params["steps"]):
+        model.t = t + 1  # Manually set time counter for traffic light cycling
+        model.step()
+        frame = {
+            "time": model.t,
+            "active_group": model.active_group,  # Traffic light group instead of lights
+            "cars": [
+                {
+                    "id": car.id,  # Use persistent car ID from agentpy
+                    "x": float(car.position[0]),
+                    "y": float(car.position[1]),
+                    "state": car.state,
+                    "spawn_node": car.path[0] if car.path else "unknown",
+                    "target_node": car.target_node_id,
+                }
+                for i, car in enumerate(model.cars)
+            ],
+        }
+        frames.append(frame)
+
+    # Guardar el JSON
+    with open("sim_output.json", "w") as f:
+        json.dump(frames, f)
+
+    print(f"Simulación completada - {len(frames)} frames guardados en sim_output.json")
+
+
+class TCPSender:
+    def __init__(self, host="localhost", port=1101):
+        self.host = host
+        self.port = port
+        self.socket = None
+        self.connected = False
+
+    def connect(self):
+        try:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.connect((self.host, self.port))
+            self.connected = True
+            print(f"Connected to Unity at {self.host}:{self.port}")
+            return True
+        except Exception as e:
+            print(f"Connection failed: {e}")
+            return False
+
+    def send_complete_json(self, json_file_path):
+        if not self.connected:
+            return False
+        try:
+            with open(json_file_path, "r") as f:
+                data = json.load(f)
+
+            json_str = json.dumps(data)
+            size = len(json_str.encode("utf-8"))
+
+            # Send size first (4 bytes)
+            self.socket.sendall(size.to_bytes(4, byteorder="big"))
+            # Then send the JSON data
+            self.socket.sendall(json_str.encode("utf-8"))
+            print(f"Sent complete JSON ({size} bytes)")
+            return True
+        except Exception as e:
+            print(f"Send complete JSON failed: {e}")
+            return False
+
+    def disconnect(self):
+        if self.socket:
+            self.socket.close()
+        self.connected = False
+
+
+def send_json_file_to_unity(json_file_path, host="localhost", port=1101):
+    sender = TCPSender(host, port)
+    if sender.connect():
+        sender.send_complete_json(json_file_path)
+        sender.disconnect()
+
+
+def run_simulation_and_send_json():
+    frames = []
+    model = TrafficModel(params)
+    model.setup()
+    for t in range(params["steps"]):
+        model.t = t + 1  # Manually set time counter for traffic light cycling
+        model.step()
+        frame = {
+            "time": model.t,
+            "active_group": model.active_group,  # Traffic light group instead of lights
+            "cars": [
+                {
+                    "id": car.id,  # Use persistent car ID from agentpy
+                    "x": float(car.position[0]),
+                    "y": float(car.position[1]),
+                    "state": car.state,
+                    "spawn_node": car.path[0] if car.path else "unknown",
+                    "target_node": car.target_node_id,
+                }
+                for i, car in enumerate(model.cars)
+            ],
+        }
+        frames.append(frame)
+
+    # Guardar
+    with open("data.json", "w") as f:
+        json.dump(frames, f)
+
+    # Mandar a unity
+    send_json_file_to_unity("data.json")
+    print("ENVIADO A UNITY EXITOSAMENTE!!!!!! YAY")
+
+
+def send_current_simulation_state_to_unity(model, host="localhost", port=1101):
+    """Send the current simulation state to Unity in real-time"""
+    sender = TCPSender(host, port)
+    if sender.connect():
+        # Get current simulation data
+        data = get_simulation_data(model)
+        data["timestamp"] = model.t  # Add timestamp for real-time updates
+
+        # Convert to JSON and send
+        json_str = json.dumps(data)
+        size = len(json_str.encode("utf-8"))
+
+        # Send size first (4 bytes)
+        sender.socket.sendall(size.to_bytes(4, byteorder="big"))
+        # Then send the JSON data
+        sender.socket.sendall(json_str.encode("utf-8"))
+        print(f"Sent current simulation state ({size} bytes) to Unity")
+
+        sender.disconnect()
+        return True
+    return False
+
+
+def run_simulation_and_save_json(filename="traffic_simulation.json"):
+    """Run simulation and save to JSON file without sending to Unity"""
+    frames = []
+    model = TrafficModel(params)
+    model.setup()
+
+    for t in range(params["steps"]):
+        model.t = t + 1  # Manually set time counter for traffic light cycling
+        model.step()
+        frame = {
+            "time": model.t,
+            "active_group": model.active_group,
+            "cars": [
+                {
+                    "id": car.id,  # Use persistent car ID from agentpy
+                    "x": float(car.position[0]),
+                    "y": float(car.position[1]),
+                    "state": car.state,
+                    "spawn_node": car.path[0] if car.path else "unknown",
+                    "target_node": car.target_node_id,
+                }
+                for i, car in enumerate(model.cars)
+            ],
+        }
+        frames.append(frame)
+
+    # Save to JSON file
+    with open(filename, "w") as f:
+        json.dump(frames, f)
+
+    print(f"Simulación completada - {len(frames)} frames guardados en {filename}")
+    return model
+
+
+if __name__ == "__main__":
+    print("Traffic Simulation with Unity Integration")
+    print("=" * 50)
+    print("Options:")
+    print("1. Run simulation and send to Unity")
+    print("2. Run simulation and save to JSON only")
+    print("3. Run with animation (no Unity integration)")
+    print("=" * 50)
+
+    choice = input("Choose option (1-3): ").strip()
+
+    if choice == "1":
+        print("Running simulation and sending to Unity...")
+        run_simulation_and_send_json()
+    elif choice == "2":
+        filename = input("Enter filename (default: traffic_simulation.json): ").strip()
+        if not filename:
+            filename = "traffic_simulation.json"
+        print(f"Running simulation and saving to {filename}...")
+        run_simulation_and_save_json(filename)
+    elif choice == "3":
+        print("Running with animation...")
+        model, anim = run_simulation_with_animation()
+        plt.show()
+    else:
+        print("Invalid choice. Running default option (animation)...")
+        model, anim = run_simulation_with_animation()
+        plt.show()
