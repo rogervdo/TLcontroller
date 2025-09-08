@@ -3,13 +3,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 import random
-from collections import defaultdict
+import heapq
 
 # Simulation parameters
 params = {
-    "steps": 150,
-    "spawn_rate": 0.15,  # Probability of spawning a car each step
-    "car_speed": 100.0,  # Units per step
+    "steps": 100,
+    "spawn_rate": 1,  # Probability of spawning a car each step
     "world_size": 500,  # World boundaries (0 to world_size)
 }
 
@@ -17,11 +16,14 @@ params = {
 class TrafficNode:
     """Represents a node in the road network"""
 
-    def __init__(self, node_id, x, y, node_type="intersection"):
+    def __init__(self, node_id, x, y, node_type="intersection", group_id=None):
         self.id = node_id
         self.x = x
         self.y = y
         self.node_type = node_type  # "spawn", "intersection", "destination"
+        self.group_id = (
+            group_id  # Group ID for stoplight functionality (None if not applicable)
+        )
         self.connected_nodes = {}  # {node_id: distance}
 
     def add_connection(self, target_node_id, distance):
@@ -40,9 +42,18 @@ class Car(ap.Agent):
         self.target_node_id = target_node_id
         self.path = []  # Will store the path as list of node IDs
         self.current_path_index = 0
-        self.progress = 0.0  # Progress along current edge (0.0 to 1.0)
-        self.speed = params["car_speed"]
         self.state = "moving"  # 'moving', 'arrived'
+
+        # Assign color based on spawn node
+        spawn_colors = {
+            "8_26": "#4169E1",  # Royal blue
+            "18_2": "#32CD32",  # Lime green
+            "2_14": "#FF9500",  # Deep pink
+            "2_12": "#FFD700",  # Gold
+            "22_4": "#9932CC",  # Dark orchid
+            "30_15": "#FF4500",  # Orange red
+        }
+        self.color = spawn_colors.get(start_node_id, "white")
 
         # Calculate initial path
         self.calculate_path()
@@ -51,60 +62,86 @@ class Car(ap.Agent):
         if self.path:
             start_node = self.model.road_network.nodes[self.current_node_id]
             self.position = start_node.get_position().copy()
+            # Set occupancy
+            self.model.node_occupancy[self.current_node_id] = self.id
         else:
             self.state = "arrived"
 
     def calculate_path(self):
-        """Simple pathfinding - for now just direct connection or random walk"""
+        """Pathfinding using A* algorithm for optimal paths"""
         network = self.model.road_network
 
         # If direct connection exists, use it
         if self.target_node_id in network.nodes[self.current_node_id].connected_nodes:
             self.path = [self.current_node_id, self.target_node_id]
         else:
-            # Simple random walk pathfinding (not optimal, but works for demo)
-            self.path = self.find_random_path()
+            # Use A* pathfinding for optimal path
+            self.path = self.find_astar_path()
 
-    def find_random_path(self):
-        """Find a path using random walk with some bias toward target"""
+    def find_astar_path(self):
+        """Find optimal path using A* algorithm"""
         network = self.model.road_network
-        path = [self.current_node_id]
-        current = self.current_node_id
-        max_steps = 30  # Prevent infinite loops
+        start = self.current_node_id
+        goal = self.target_node_id
 
-        for _ in range(max_steps):
-            if current == self.target_node_id:
-                break
+        # Priority queue for open set: (f_score, node_id)
+        open_set = []
+        heapq.heappush(open_set, (0, start))
 
-            connections = list(network.nodes[current].connected_nodes.keys())
-            if not connections:
-                break
+        # Came from dictionary to reconstruct path
+        came_from = {}
 
-            # Simple heuristic: prefer nodes closer to target
-            target_pos = network.nodes[self.target_node_id].get_position()
-            best_next = None
-            best_distance = float("inf")
+        # g_score: cost from start to current node
+        g_score = {node_id: float("inf") for node_id in network.nodes}
+        g_score[start] = 0
 
-            for next_node_id in connections:
-                next_pos = network.nodes[next_node_id].get_position()
-                distance = np.linalg.norm(next_pos - target_pos)
-                if distance < best_distance:
-                    best_distance = distance
-                    best_next = next_node_id
+        # f_score: estimated total cost from start to goal through current node
+        f_score = {node_id: float("inf") for node_id in network.nodes}
+        f_score[start] = self.heuristic(start, goal)
 
-            if best_next and best_next not in path:  # Avoid cycles
-                path.append(best_next)
-                current = best_next
-            else:
-                # Fallback to random choice
-                available = [n for n in connections if n not in path]
-                if available:
-                    next_node = random.choice(available)
-                    path.append(next_node)
-                    current = next_node
-                else:
-                    break
+        while open_set:
+            # Get node with lowest f_score
+            current_f, current = heapq.heappop(open_set)
 
+            if current == goal:
+                # Reconstruct path
+                return self.reconstruct_path(came_from, current)
+
+            # Check all neighbors
+            for neighbor in network.nodes[current].connected_nodes:
+                # Calculate tentative g_score
+                edge_distance = network.nodes[current].connected_nodes[neighbor]
+                tentative_g_score = g_score[current] + edge_distance
+
+                if tentative_g_score < g_score[neighbor]:
+                    # This path to neighbor is better than any previous one
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g_score
+                    f_score[neighbor] = tentative_g_score + self.heuristic(
+                        neighbor, goal
+                    )
+
+                    # Add to open set if not already there
+                    if neighbor not in [item[1] for item in open_set]:
+                        heapq.heappush(open_set, (f_score[neighbor], neighbor))
+
+        # No path found
+        return []
+
+    def heuristic(self, node_id1, node_id2):
+        """Euclidean distance heuristic"""
+        network = self.model.road_network
+        pos1 = network.nodes[node_id1].get_position()
+        pos2 = network.nodes[node_id2].get_position()
+        return np.linalg.norm(pos2 - pos1)
+
+    def reconstruct_path(self, came_from, current):
+        """Reconstruct path from came_from dictionary"""
+        path = [current]
+        while current in came_from:
+            current = came_from[current]
+            path.append(current)
+        path.reverse()
         return path
 
     def step(self):
@@ -116,38 +153,42 @@ class Car(ap.Agent):
             self.state = "arrived"
             return
 
-        # Get current and next nodes
-        current_node_id = self.path[self.current_path_index]
+        # Get next node
         next_node_id = self.path[self.current_path_index + 1]
+        next_node = self.model.road_network.nodes[next_node_id]
 
-        network = self.model.road_network
-        current_node = network.nodes[current_node_id]
-        next_node = network.nodes[next_node_id]
+        # Check if next node is occupied
+        if self.model.node_occupancy[next_node_id] is not None:
+            return  # Wait for the node to be free
 
-        # Calculate distance between nodes
-        edge_distance = current_node.connected_nodes.get(next_node_id, 0)
-        if edge_distance == 0:
-            # Fallback to Euclidean distance
-            edge_distance = np.linalg.norm(
-                next_node.get_position() - current_node.get_position()
-            )
+        # Yield check for merge points
+        for rule in self.model.yield_rules:
+            if self.current_node_id == rule["yield"] and next_node_id == rule["merge"]:
+                if self.model.node_occupancy[rule["priority"]] is not None:
+                    return  # Yield to priority car
 
-        # Move along the edge
-        if edge_distance > 0:
-            progress_increment = self.speed / edge_distance
-            self.progress += progress_increment
+        # Group check for stoplight functionality
+        current_node = self.model.road_network.nodes[self.current_node_id]
+        if current_node.group_id is not None:
+            stoplight_nodes = [
+                "8_16",
+                "8_14",
+                "8_12",
+                "18_16",
+                "18_14",
+                "18_12",
+            ]  # Example stoplight nodes
+            if next_node_id in stoplight_nodes:
+                if current_node.group_id != self.model.active_group:
+                    return  # Wait for green light
 
-            # Update position based on progress
-            start_pos = current_node.get_position()
-            end_pos = next_node.get_position()
-            self.position = start_pos + self.progress * (end_pos - start_pos)
-
-            # Check if we've reached the next node
-            if self.progress >= 1.0:
-                self.progress = 0.0
-                self.current_path_index += 1
-                self.current_node_id = next_node_id
-                self.position = end_pos.copy()
+        # Move to next node instantly
+        self.position = next_node.get_position().copy()
+        # Update occupancy
+        self.model.node_occupancy[self.current_node_id] = None
+        self.model.node_occupancy[next_node_id] = self.id
+        self.current_node_id = next_node_id
+        self.current_path_index += 1
 
 
 class RoadNetwork:
@@ -158,9 +199,9 @@ class RoadNetwork:
         self.spawn_nodes = []
         self.destination_nodes = []
 
-    def add_node(self, node_id, x, y, node_type="intersection"):
+    def add_node(self, node_id, x, y, node_type="intersection", group_id=None):
         """Add a node to the network"""
-        node = TrafficNode(node_id, x, y, node_type)
+        node = TrafficNode(node_id, x, y, node_type, group_id)
         self.nodes[node_id] = node
 
         if node_type == "spawn":
@@ -179,6 +220,9 @@ class RoadNetwork:
             self.nodes[node_id2].add_connection(node_id1, distance)
 
     def create_simple_network(self, world_size):
+        # Additional new path nodes (user request)
+
+        # New path nodes (user request)
         """Create custom road network based on specified layout"""
         # Scale factor to fit coordinates in world_size
         scale = world_size / 30  # Assuming max coordinate is around 26
@@ -192,7 +236,7 @@ class RoadNetwork:
         self.add_node("8_12", 8 * scale, 12 * scale, "intersection")
         self.add_node("8_14", 8 * scale, 14 * scale, "intersection")
         self.add_node("8_16", 8 * scale, 16 * scale, "intersection")
-        self.add_node("8_18", 8 * scale, 18 * scale, "intersection")
+        self.add_node("8_18", 8 * scale, 18 * scale, "intersection", group_id=0)
         self.add_node("8_20", 8 * scale, 20 * scale, "intersection")
         self.add_node("8_22", 8 * scale, 22 * scale, "intersection")
         self.add_node("8_24", 8 * scale, 24 * scale, "intersection")
@@ -203,13 +247,45 @@ class RoadNetwork:
         self.add_node("18_4", 18 * scale, 4 * scale, "intersection")
         self.add_node("18_6", 18 * scale, 6 * scale, "intersection")
         self.add_node("18_8", 18 * scale, 8 * scale, "intersection")
-        self.add_node("18_10", 18 * scale, 10 * scale, "intersection")
+        self.add_node("18_10", 18 * scale, 10 * scale, "intersection", group_id=0)
         self.add_node("18_12", 18 * scale, 12 * scale, "intersection")
         self.add_node("18_14", 18 * scale, 14 * scale, "intersection")
         self.add_node("18_16", 18 * scale, 16 * scale, "intersection")
         self.add_node("18_18", 18 * scale, 18 * scale, "intersection")
         self.add_node("18_20", 18 * scale, 20 * scale, "intersection")
         self.add_node("18_22", 18 * scale, 22 * scale, "intersection")
+
+        # New nodes and spawns (user request)
+        self.add_node("7_19", 7 * scale, 19 * scale, "intersection")
+        self.add_node("5_17", 5 * scale, 17 * scale, "intersection")
+        self.add_node("4_16", 4 * scale, 16 * scale, "intersection")
+
+        self.add_node("2_14", -2 * scale, 14 * scale, "spawn")
+        self.add_node("0_14", 0 * scale, 14 * scale, "intersection")
+        self.add_node("2_14", 2 * scale, 14 * scale, "intersection")
+        self.add_node("4_14", 4 * scale, 14 * scale, "intersection")
+        self.add_node("6_14", 6 * scale, 14 * scale, "intersection", group_id=1)
+        self.add_node("8_14", 8 * scale, 14 * scale, "intersection")
+
+        self.add_node("2_12", -2 * scale, 12 * scale, "spawn")
+        self.add_node("0_12", 0 * scale, 12 * scale, "intersection")
+        self.add_node("2_12", 2 * scale, 12 * scale, "intersection")
+        self.add_node("4_12", 4 * scale, 12 * scale, "intersection")
+        self.add_node("6_12", 6 * scale, 12 * scale, "intersection", group_id=1)
+        self.add_node("8_12", 8 * scale, 12 * scale, "intersection")
+
+        self.add_node("30_15", 30 * scale, 15 * scale, "spawn")
+        self.add_node("28_15", 28 * scale, 15 * scale, "intersection")
+        self.add_node("26_15", 26 * scale, 15 * scale, "intersection")
+        self.add_node("24_15", 24 * scale, 15 * scale, "intersection")
+        self.add_node("22_15", 22 * scale, 15 * scale, "intersection")
+        self.add_node("20_15", 20 * scale, 15 * scale, "intersection", group_id=2)
+
+        self.add_node("10_13", 10 * scale, 13 * scale, "intersection")
+        self.add_node("12_12", 12 * scale, 12 * scale, "intersection")
+        self.add_node("14_12", 14 * scale, 12 * scale, "intersection")
+        self.add_node("16_13", 16 * scale, 13 * scale, "intersection", group_id=1)
+        self.add_node("18_14", 18 * scale, 14 * scale, "intersection")
 
         # New left exit path
         self.add_node("6_16", 6 * scale, 16 * scale, "intersection")
@@ -228,11 +304,11 @@ class RoadNetwork:
         self.add_node("10_11", 10 * scale, 11 * scale, "intersection")
         self.add_node("12_10", 12 * scale, 10 * scale, "intersection")
         self.add_node("14_10", 14 * scale, 10 * scale, "intersection")
-        self.add_node("16_11", 16 * scale, 11 * scale, "intersection")
+        self.add_node("16_11", 16 * scale, 11 * scale, "intersection", group_id=1)
         self.add_node("16_17", 16 * scale, 17 * scale, "intersection")
         self.add_node("14_18", 14 * scale, 18 * scale, "intersection")
         self.add_node("12_18", 12 * scale, 18 * scale, "intersection")
-        self.add_node("10_17", 10 * scale, 17 * scale, "intersection")
+        self.add_node("10_17", 10 * scale, 17 * scale, "intersection", group_id=2)
 
         # Uturns
         self.add_node("16_7", 16 * scale, 7 * scale, "intersection")
@@ -244,6 +320,24 @@ class RoadNetwork:
         self.add_node("14_20", 14 * scale, 20 * scale, "intersection")
         self.add_node("16_21", 16 * scale, 21 * scale, "intersection")
         self.add_node("18_22", 18 * scale, 22 * scale, "intersection")
+
+        self.add_node("16_15", 16 * scale, 15 * scale, "intersection")
+        self.add_node("14_16", 14 * scale, 16 * scale, "intersection")
+        self.add_node("12_16", 12 * scale, 16 * scale, "intersection")
+        self.add_node("10_15", 10 * scale, 15 * scale, "intersection", group_id=2)
+
+        # New nodes for user request
+        self.add_node("6_9", 6 * scale, 9 * scale, "intersection")
+        self.add_node("6_7", 6 * scale, 7 * scale, "intersection")
+        self.add_node("6_5", 6 * scale, 5 * scale, "intersection")
+        self.add_node("6_3", 6 * scale, 3 * scale, "destination")  # EXIT
+
+        # New nodes for user request (22,x path)
+        self.add_node("22_4", 22 * scale, 4 * scale, "spawn")
+        self.add_node("22_6", 22 * scale, 6 * scale, "intersection")
+        self.add_node("22_8", 22 * scale, 8 * scale, "intersection")
+        self.add_node("22_10", 22 * scale, 10 * scale, "intersection")
+        self.add_node("22_12", 22 * scale, 12 * scale, "intersection")
 
         # Define all connections based on your specification
         connections = [
@@ -279,12 +373,12 @@ class RoadNetwork:
             ("10_11", "12_10"),  # 10,11 > 12,10
             ("12_10", "14_10"),  # 12,10 > 14,10
             ("14_10", "16_11"),  # 14,10 > 16,11
-            ("16_11", "18_12"),  # 16,11 > 18,12
+            ("16_11", "18_12"),  # 16,11 > 18,12 UN CARRIL
             # Lower roundabout connections (counter-clockwise)
             ("16_17", "14_18"),  # 16,17 > 14,18
             ("14_18", "12_18"),  # 14,18 > 12,18
             ("12_18", "10_17"),  # 12,18 > 10,17
-            ("10_17", "8_16"),  # 10,17 > 8,16
+            ("10_17", "8_16"),  # 10,17 > 8,16 UN CARRIL
             # Uturn
             ("16_7", "14_8"),
             ("14_8", "12_8"),
@@ -305,8 +399,52 @@ class RoadNetwork:
             ("22_12", "24_12"),
             ("24_12", "26_12"),
             # Connections from previous nodes
-            ("10_17", "6_16"),
-            ("16_11", "20_12"),
+            ("8_16", "6_16"),
+            ("18_12", "20_12"),
+            # User requested connections
+            ("7_19", "5_17"),
+            ("5_17", "4_16"),
+            ("2_14", "0_14"),
+            ("0_14", "2_14"),
+            ("2_14", "4_14"),
+            ("4_14", "6_14"),
+            ("6_14", "8_14"),
+            ("2_12", "0_12"),
+            ("0_12", "2_12"),
+            ("2_12", "4_12"),
+            ("4_12", "6_12"),
+            ("6_12", "8_12"),
+            ("30_15", "28_15"),
+            ("28_15", "26_15"),
+            ("26_15", "24_15"),
+            ("24_15", "22_15"),
+            ("22_15", "20_15"),
+            ("20_15", "18_16"),
+            ("10_13", "12_12"),
+            ("12_12", "14_12"),
+            ("14_12", "16_13"),
+            ("16_13", "18_14"),
+            # Connections to existing nodes
+            ("8_20", "7_19"),
+            ("8_14", "10_13"),
+            # User requested new path connections
+            ("16_15", "14_16"),
+            ("14_16", "12_16"),
+            ("12_16", "10_15"),
+            ("10_15", "8_14"),
+            # Connection from existing node
+            ("18_14", "16_15"),
+            ("20_15", "18_14"),
+            # New connections for user request
+            ("6_9", "6_7"),
+            ("6_7", "6_5"),
+            ("6_5", "6_3"),
+            ("8_10", "6_9"),
+            # New connections for 22,x path
+            ("22_4", "22_6"),
+            ("22_6", "22_8"),
+            ("22_8", "22_10"),
+            ("22_10", "22_12"),
         ]
 
         # Add all connections as directed edges
@@ -327,6 +465,9 @@ class TrafficModel(ap.Model):
         self.road_network = RoadNetwork()
         self.road_network.create_simple_network(params["world_size"])
 
+        # Initialize node occupancy
+        self.node_occupancy = {node_id: None for node_id in self.road_network.nodes}
+
         # Initialize car list
         self.cars = ap.AgentList(self, 0, Car)
 
@@ -334,8 +475,35 @@ class TrafficModel(ap.Model):
         self.total_cars_spawned = 0
         self.total_cars_arrived = 0
 
+        # Traffic light state
+        self.active_group = 0  # Start with group 0
+        self.group_cycle_steps = 5  # Switch every 5 steps
+
+        # Yield rules for merge points
+        self.yield_rules = [
+            {"yield": "16_21", "merge": "18_22", "priority": "18_20"},
+            {"yield": "5_17", "merge": "4_16", "priority": "6_16"},
+            {"yield": "22_10", "merge": "22_12", "priority": "20_12"},
+            {"yield": "10_7", "merge": "8_6", "priority": "8_8"},
+        ]
+
+        # Spawn-destination restrictions mapping with percentages
+        self.spawn_destinations = {
+            "2_14": {"18_26": 1.0},
+            "2_12": {"6_3": 41, "8_2": 116, "26_12": 67},
+            "8_26": {"2_16": 280, "18_26": 236, "6_3": 164, "8_2": 49, "26_12": 35},
+            "18_2": {"8_2": 214, "18_26": 68, "2_16": 622, "6_3": 34},
+            "22_4": {"26_12": 1.0},
+            "30_15": {"18_26": 82, "2_16": 162, "6_3": 24, "8_2": 89},
+        }
+
     def step(self):
-        # Spawn new cars with random destinations
+        # Cycle traffic light groups every 5 steps
+        if self.t % self.group_cycle_steps == 0 and self.t > 0:
+            self.active_group = (self.active_group + 1) % 3
+            print(f"Traffic light switched to Group {self.active_group}")
+
+        # Spawn new cars with restricted destinations
         if (
             random.random() < params["spawn_rate"]
             and self.road_network.spawn_nodes
@@ -343,15 +511,20 @@ class TrafficModel(ap.Model):
         ):
             spawn_node = random.choice(self.road_network.spawn_nodes)
 
-            # Assign a random exit point (destination node) to each car
-            available_destinations = [
-                dest
-                for dest in self.road_network.destination_nodes
-                if dest != spawn_node
-            ]  # Don't spawn to same location
+            # Get destination probabilities for this spawn point
+            dest_probs = self.spawn_destinations.get(spawn_node, {})
 
-            if available_destinations:
-                dest_node = random.choice(available_destinations)
+            # Filter to only include destinations that exist in the network
+            available_dests = {
+                dest: prob
+                for dest, prob in dest_probs.items()
+                if dest in self.road_network.destination_nodes
+            }
+
+            if available_dests:
+                destinations = list(available_dests.keys())
+                probabilities = list(available_dests.values())
+                dest_node = random.choices(destinations, weights=probabilities, k=1)[0]
                 new_car = Car(self, start_node_id=spawn_node, target_node_id=dest_node)
                 self.cars.append(new_car)
                 self.total_cars_spawned += 1
@@ -374,6 +547,8 @@ class TrafficModel(ap.Model):
             print(
                 f"Car completed journey: {car.path[0] if car.path else 'unknown'} → {car.target_node_id}"
             )
+            # Clear occupancy
+            self.node_occupancy[car.current_node_id] = None
             self.cars.remove(car)
             self.total_cars_arrived += 1
 
@@ -389,52 +564,69 @@ class TrafficModel(ap.Model):
 def draw_simulation(model, ax):
     """Draw the current state of the simulation"""
     ax.clear()
-    ax.set_xlim(0, params["world_size"])
+    ax.set_xlim(-50, params["world_size"])
     ax.set_ylim(0, params["world_size"])
     ax.set_aspect("equal")
     ax.set_title(f"Node-Based Traffic Simulation - Step {model.t}")
 
     # Draw network nodes
+    stoplight_nodes = ["8_16", "8_14", "8_12", "18_16", "18_14", "18_12"]
+    group_colors = {0: "orange", 1: "purple", 2: "cyan"}
     for node_id, node in model.road_network.nodes.items():
-        color = (
-            "green"
-            if node.node_type == "spawn"
-            else "red"
-            if node.node_type == "destination"
-            else "blue"
-        )
+        if node_id in stoplight_nodes:
+            # Highlight stoplight nodes with active group color
+            color = group_colors.get(model.active_group, "yellow")
+        elif node.group_id is not None:
+            # Color based on group_id
+            color = group_colors.get(
+                node.group_id, "yellow"
+            )  # Default to yellow if unknown group
+        else:
+            color = (
+                "green"
+                if node.node_type == "spawn"
+                else "red"
+                if node.node_type == "destination"
+                else "blue"
+            )
 
         ax.add_patch(Circle((node.x, node.y), 8, color=color, alpha=0.7))
         ax.text(node.x, node.y - 15, node_id, ha="center", fontsize=8)
 
-    # Draw network edges
+    # Draw network edges as arrows
+    yield_connections = [
+        ("16_21", "18_22"),
+        ("5_17", "4_16"),
+        ("22_10", "22_12"),
+        ("10_7", "8_6"),
+    ]
     for node_id, node in model.road_network.nodes.items():
         for connected_id in node.connected_nodes:
             connected_node = model.road_network.nodes[connected_id]
-            ax.plot(
-                [node.x, connected_node.x],
-                [node.y, connected_node.y],
-                "k-",
+            dx = connected_node.x - node.x
+            dy = connected_node.y - node.y
+            # Special color for yield connections
+            if (node_id, connected_id) in yield_connections:
+                arrow_color = "red"
+            else:
+                arrow_color = "k"
+            ax.arrow(
+                node.x,
+                node.y,
+                dx,
+                dy,
+                head_width=8,
+                head_length=12,
+                fc=arrow_color,
+                ec=arrow_color,
                 alpha=0.3,
-                linewidth=1,
+                length_includes_head=True,
             )
 
-    # Draw cars with color coding based on destination
+    # Draw cars with spawn-based colors
     if len(model.cars) > 0:
         car_positions = np.array([car.position for car in model.cars])
-
-        # Color cars based on their target destination
-        car_colors = []
-        destination_color_map = {
-            "8_2": "orange",
-            "18_26": "purple",
-            "2_16": "yellow",
-            "26_12": "cyan",
-        }
-
-        for car in model.cars:
-            color = destination_color_map.get(car.target_node_id, "orange")
-            car_colors.append(color)
+        car_colors = [car.color for car in model.cars]
 
         ax.scatter(
             car_positions[:, 0],
@@ -446,7 +638,7 @@ def draw_simulation(model, ax):
             linewidth=0.5,
         )
 
-    # Add enhanced legend with destination info
+    # Add legend
     legend_elements = [
         plt.Line2D(
             [0],
@@ -481,8 +673,8 @@ def draw_simulation(model, ax):
             marker="o",
             color="w",
             markerfacecolor="orange",
-            markersize=6,
-            label="Cars → 8_2",
+            markersize=8,
+            label="Stoplight (Group 0 Active)",
         ),
         plt.Line2D(
             [0],
@@ -490,17 +682,8 @@ def draw_simulation(model, ax):
             marker="o",
             color="w",
             markerfacecolor="purple",
-            markersize=6,
-            label="Cars → 18_26",
-        ),
-        plt.Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="yellow",
-            markersize=6,
-            label="Cars → 2_16",
+            markersize=8,
+            label="Stoplight (Group 1 Active)",
         ),
         plt.Line2D(
             [0],
@@ -508,8 +691,71 @@ def draw_simulation(model, ax):
             marker="o",
             color="w",
             markerfacecolor="cyan",
+            markersize=8,
+            label="Stoplight (Group 2 Active)",
+        ),
+        plt.Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor="#4169E1",
             markersize=6,
-            label="Cars → 26_12",
+            label="Cars from 8_26",
+        ),
+        plt.Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor="#32CD32",
+            markersize=6,
+            label="Cars from 18_2",
+        ),
+        plt.Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor="#FF1493",
+            markersize=6,
+            label="Cars from 2_14",
+        ),
+        plt.Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor="#FFD700",
+            markersize=6,
+            label="Cars from 2_12",
+        ),
+        plt.Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor="#9932CC",
+            markersize=6,
+            label="Cars from 22_4",
+        ),
+        plt.Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor="#FF4500",
+            markersize=6,
+            label="Cars from 30_15",
+        ),
+        plt.Line2D(
+            [0],
+            [0],
+            marker=">",
+            color="red",
+            markerfacecolor="red",
+            markersize=8,
+            label="Yield Connection",
         ),
     ]
     ax.legend(handles=legend_elements, loc="upper right")
