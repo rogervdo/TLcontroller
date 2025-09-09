@@ -46,7 +46,7 @@ JSON Data Structure:
 
 # Simulation parameters
 params = {
-    "steps": 100,
+    "steps": 500,
     "spawn_rate": 1,  # Probability of spawning a car each step
     "world_size": 500,  # World boundaries (0 to world_size)
 }
@@ -190,6 +190,8 @@ class Car(ap.Agent):
         # Check if we've reached the end of our path
         if self.current_path_index >= len(self.path) - 1:
             self.state = "arrived"
+            # Immediately clear occupancy when arriving at destination
+            self.model.node_occupancy[self.current_node_id] = None
             return
 
         # Get next node
@@ -586,8 +588,9 @@ class TrafficModel(ap.Model):
             print(
                 f"Car completed journey: {car.path[0] if car.path else 'unknown'} → {car.target_node_id}"
             )
-            # Clear occupancy
-            self.node_occupancy[car.current_node_id] = None
+            # Clear occupancy (safety check - should already be cleared when car arrived)
+            if self.node_occupancy[car.current_node_id] == car.id:
+                self.node_occupancy[car.current_node_id] = None
             self.cars.remove(car)
             self.total_cars_arrived += 1
 
@@ -841,13 +844,18 @@ def get_simulation_data(model):
 
     # Car positions and states
     for i, car in enumerate(model.cars):
+        # Check if current node is a destination/exit node
+        is_at_exit = car.current_node_id in model.road_network.destination_nodes
+
         data["cars"].append(
             {
                 "id": car.id,  # Use persistent car ID from agentpy
                 "x": float(car.position[0]),
                 "y": float(car.position[1]),
                 "state": car.state,
+                "current_node": car.current_node_id,
                 "target_node": car.target_node_id,
+                "is_at_exit": is_at_exit,
             }
         )
 
@@ -917,8 +925,11 @@ def run_simulation():
                     "x": float(car.position[0]),
                     "y": float(car.position[1]),
                     "state": car.state,
+                    "current_node": car.current_node_id,
                     "spawn_node": car.path[0] if car.path else "unknown",
                     "target_node": car.target_node_id,
+                    "is_at_exit": car.current_node_id
+                    in model.road_network.destination_nodes,
                 }
                 for i, car in enumerate(model.cars)
             ],
@@ -999,8 +1010,11 @@ def run_simulation_and_send_json():
                     "x": float(car.position[0]),
                     "y": float(car.position[1]),
                     "state": car.state,
+                    "current_node": car.current_node_id,
                     "spawn_node": car.path[0] if car.path else "unknown",
                     "target_node": car.target_node_id,
+                    "is_at_exit": car.current_node_id
+                    in model.road_network.destination_nodes,
                 }
                 for i, car in enumerate(model.cars)
             ],
@@ -1057,8 +1071,11 @@ def run_simulation_and_save_json(filename="traffic_simulation.json"):
                     "x": float(car.position[0]),
                     "y": float(car.position[1]),
                     "state": car.state,
+                    "current_node": car.current_node_id,
                     "spawn_node": car.path[0] if car.path else "unknown",
                     "target_node": car.target_node_id,
+                    "is_at_exit": car.current_node_id
+                    in model.road_network.destination_nodes,
                 }
                 for i, car in enumerate(model.cars)
             ],
