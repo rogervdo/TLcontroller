@@ -941,83 +941,6 @@ def run_simulation_with_animation():
     return model, animation
 
 
-def get_simulation_data(model):
-    """Extract current simulation state for Unity"""
-    data = {
-        "step": model.t,
-        "active_group": model.active_group,  # Current traffic light group
-        "cars": [],
-        "nodes": {},
-        "stats": {
-            "active_cars": len(model.cars),
-            "total_spawned": model.total_cars_spawned,
-            "total_arrived": model.total_cars_arrived,
-        },
-    }
-
-    # Car positions and states
-    for i, car in enumerate(model.cars):
-        # Check if current node is a destination/exit node
-        is_at_exit = car.current_node_id in model.road_network.destination_nodes
-
-        data["cars"].append(
-            {
-                "id": car.id,  # Use persistent car ID from agentpy
-                "x": float(car.position[0]),
-                "y": float(car.position[1]),
-                "state": car.state,
-                "current_node": car.current_node_id,
-                "target_node": car.target_node_id,
-                "is_at_exit": is_at_exit,
-            }
-        )
-
-    # Node positions and connections
-    for node_id, node in model.road_network.nodes.items():
-        data["nodes"][node_id] = {
-            "x": node.x,
-            "y": node.y,
-            "type": node.node_type,
-            "connections": list(node.connected_nodes.keys()),
-        }
-
-    return data
-
-
-# Example usage:
-# if __name__ == "__main__":
-# print("Starting Node-Based Traffic Simulation")
-# print("=" * 50)
-# print("Network Configuration:")
-# print("- Custom road layout with directed paths")
-# print("- START: (8,26) and (18,2)")
-# print("- EXIT POINTS: (8,2), (18,26), (2,16), (26,12)")
-# print("- Cars assigned random exit destinations")
-# print("=" * 50)
-
-# Choose your preferred way to run:
-
-# Option 1: Headless for clean output (no animation warning)
-# print("Running headless simulation for 200 steps...")
-# model = run_simulation_headless(steps=200)
-# data = get_simulation_data(model)
-# print(f"Final state: {data['stats']}")
-
-# Option 2: With animation (will show the harmless warning)
-# print("Running with animation...")
-# model, anim = run_simulation_with_animation()
-
-# Run the simulation
-
-# To save as GIF (uncomment the line below):
-
-# Print some sample data for Unity integration
-# print("\nSample data structure for Unity:")
-# print(f"Number of nodes: {len(data['nodes'])}")
-# print(f"Sample car data: {data['cars'][:2] if data['cars'] else 'No cars active'}")
-# print(f"Sample node data: {list(data['nodes'].items())[:2]}")
-
-
 class TCPSender:
     def __init__(self, host="localhost", port=1101):
         self.host = host
@@ -1123,7 +1046,6 @@ if __name__ == "__main__":
 
     run_simulation_and_send_json()
 
-    if params["animation"] == True:
+    if params["animation"]:
         model, anim = run_simulation_with_animation()
-        plt.show()
         anim.save("Traffic4.gif", writer="pillow", fps=5)
