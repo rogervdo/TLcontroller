@@ -996,36 +996,36 @@ def get_simulation_data(model):
 
 # Example usage:
 # if __name__ == "__main__":
-    # print("Starting Node-Based Traffic Simulation")
-    # print("=" * 50)
-    # print("Network Configuration:")
-    # print("- Custom road layout with directed paths")
-    # print("- START: (8,26) and (18,2)")
-    # print("- EXIT POINTS: (8,2), (18,26), (2,16), (26,12)")
-    # print("- Cars assigned random exit destinations")
-    # print("=" * 50)
+# print("Starting Node-Based Traffic Simulation")
+# print("=" * 50)
+# print("Network Configuration:")
+# print("- Custom road layout with directed paths")
+# print("- START: (8,26) and (18,2)")
+# print("- EXIT POINTS: (8,2), (18,26), (2,16), (26,12)")
+# print("- Cars assigned random exit destinations")
+# print("=" * 50)
 
-    # Choose your preferred way to run:
+# Choose your preferred way to run:
 
-    # Option 1: Headless for clean output (no animation warning)
-    # print("Running headless simulation for 200 steps...")
-    # model = run_simulation_headless(steps=200)
-    # data = get_simulation_data(model)
-    # print(f"Final state: {data['stats']}")
+# Option 1: Headless for clean output (no animation warning)
+# print("Running headless simulation for 200 steps...")
+# model = run_simulation_headless(steps=200)
+# data = get_simulation_data(model)
+# print(f"Final state: {data['stats']}")
 
-    # Option 2: With animation (will show the harmless warning)
-    # print("Running with animation...")
-#model, anim = run_simulation_with_animation()
+# Option 2: With animation (will show the harmless warning)
+# print("Running with animation...")
+# model, anim = run_simulation_with_animation()
 
-    # Run the simulation
+# Run the simulation
 
-    # To save as GIF (uncomment the line below):
+# To save as GIF (uncomment the line below):
 
-    # Print some sample data for Unity integration
-    # print("\nSample data structure for Unity:")
-    # print(f"Number of nodes: {len(data['nodes'])}")
-    # print(f"Sample car data: {data['cars'][:2] if data['cars'] else 'No cars active'}")
-    # print(f"Sample node data: {list(data['nodes'].items())[:2]}")
+# Print some sample data for Unity integration
+# print("\nSample data structure for Unity:")
+# print(f"Number of nodes: {len(data['nodes'])}")
+# print(f"Sample car data: {data['cars'][:2] if data['cars'] else 'No cars active'}")
+# print(f"Sample node data: {list(data['nodes'].items())[:2]}")
 
 
 def run_simulation():
@@ -1201,13 +1201,12 @@ if __name__ == "__main__":
     elif preset_choice == "3":
         params["preset"] = "night"
     else:
-        print("Invalid preset choice, using morning as default")
+        print("invalid: usando mañana")
         params["preset"] = "morning"
-
 
     run_simulation_and_send_json()
 
-    if params.animation == True:
+    if params["animation"] == True:
         model, anim = run_simulation_with_animation()
         plt.show()
-        anim.save("Traffic4.gif", writer="pillow", fps=1)
+        anim.save("Traffic4.gif", writer="pillow", fps=5)
