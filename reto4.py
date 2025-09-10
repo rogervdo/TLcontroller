@@ -267,32 +267,32 @@ class RoadNetwork:
         """Create custom road network based on specified layout"""
         # Manual positions for nodes, independent of x,y calculations
         positions = {
-            "8_2": (128, 32),
-            "8_4": (128, 64),
-            "8_6": (128, 96),
-            "8_8": (128, 128),
-            "8_10": (128, 160),
-            "8_12": (128, 192),
-            "8_14": (128, 224),
-            "8_16": (128, 256),
-            "8_18": (128, 288),
-            "8_20": (128, 320),
-            "8_22": (128, 352),
-            "8_24": (128, 384),
-            "8_26": (128, 416),
-            "18_2": (288, 32),
-            "18_4": (288, 64),
-            "18_6": (288, 96),
-            "18_8": (288, 128),
-            "18_10": (288, 160),
-            "18_12": (288, 192),
-            "18_14": (288, 224),
-            "18_16": (288, 256),
-            "18_18": (288, 288),
-            "18_20": (288, 320),
-            "18_22": (288, 352),
-            "7_19": (112, 304),
-            "5_17": (80, 272),
+            "8_2": (49, -99),
+            "8_4": (48, -64.7),
+            "8_6": (47, -28.4),
+            "8_8": (47, 12),
+            "8_10": (47, 51),
+            "8_12": (47, 83),
+            "8_14": (48, 117),
+            "8_16": (49, 175),
+            "8_18": (50, 200),
+            "8_20": (49.6, 244),
+            "8_22": (49, 303),
+            "8_24": (49, 250),
+            "8_26": (48, 397),
+            "18_2": (176.6, -95.8),
+            "18_4": (175, -11),
+            "18_6": (172.3, -57),
+            "18_8": (173, -3),
+            "18_10": (172, 36.9),
+            "18_12": (171, 57),
+            "18_14": (170.8, 74),
+            "18_16": (173, 168),
+            "18_18": (172, 196),
+            "18_20": (172.7, 244),
+            "18_22": (170, 307),
+            "7_19": (28, 226.6),
+            "5_17": (9.5, 209),
             "4_16": (64, 256),
             "-2_14": (-32, 224),
             "0_14": (0, 224),
@@ -320,8 +320,8 @@ class RoadNetwork:
             "22_12": (352, 192),
             "24_12": (384, 192),
             "26_12": (416, 192),
-            "18_24": (288, 384),
-            "18_26": (288, 416),
+            "18_24": (169, 364),
+            "18_26": (168, 403),
             "10_11": (160, 176),
             "12_10": (192, 160),
             "14_10": (224, 160),
@@ -938,15 +938,15 @@ def get_simulation_data(model):
 
 
 # Example usage:
-if __name__ == "__main__":
-    print("Starting Node-Based Traffic Simulation")
-    print("=" * 50)
-    print("Network Configuration:")
-    print("- Custom road layout with directed paths")
-    print("- START: (8,26) and (18,2)")
-    print("- EXIT POINTS: (8,2), (18,26), (2,16), (26,12)")
-    print("- Cars assigned random exit destinations")
-    print("=" * 50)
+# if __name__ == "__main__":
+    # print("Starting Node-Based Traffic Simulation")
+    # print("=" * 50)
+    # print("Network Configuration:")
+    # print("- Custom road layout with directed paths")
+    # print("- START: (8,26) and (18,2)")
+    # print("- EXIT POINTS: (8,2), (18,26), (2,16), (26,12)")
+    # print("- Cars assigned random exit destinations")
+    # print("=" * 50)
 
     # Choose your preferred way to run:
 
@@ -957,14 +957,13 @@ if __name__ == "__main__":
     # print(f"Final state: {data['stats']}")
 
     # Option 2: With animation (will show the harmless warning)
-    print("Running with animation...")
-    model, anim = run_simulation_with_animation()
-    plt.show()
+    # print("Running with animation...")
+#model, anim = run_simulation_with_animation()
 
     # Run the simulation
 
     # To save as GIF (uncomment the line below):
-    anim.save("Traffic.gif", writer="pillow", fps=5)
+#anim.save("Traffic.gif", writer="pillow", fps=5)
 
     # Print some sample data for Unity integration
     # print("\nSample data structure for Unity:")
@@ -1156,31 +1155,32 @@ def run_simulation_and_save_json(filename="traffic_simulation.json"):
     return model
 
 
-if __name__ == "__main__":
-    print("Traffic Simulation with Unity Integration")
-    print("=" * 50)
-    print("Options:")
-    print("1. Run simulation and send to Unity")
-    print("2. Run simulation and save to JSON only")
-    print("3. Run with animation (no Unity integration)")
-    print("=" * 50)
+#if __name__ == "__main__":
+run_simulation_and_send_json()
+    # print("Traffic Simulation with Unity Integration")
+    # print("=" * 50)
+    # print("Options:")
+    # print("1. Run simulation and send to Unity")
+    # print("2. Run simulation and save to JSON only")
+    # print("3. Run with animation (no Unity integration)")
+    # print("=" * 50)
 
-    choice = input("Choose option (1-3): ").strip()
+    # choice = input("Choose option (1-3): ").strip()
 
-    if choice == "1":
-        print("Running simulation and sending to Unity...")
-        run_simulation_and_send_json()
-    elif choice == "2":
-        filename = input("Enter filename (default: traffic_simulation.json): ").strip()
-        if not filename:
-            filename = "traffic_simulation.json"
-        print(f"Running simulation and saving to {filename}...")
-        run_simulation_and_save_json(filename)
-    elif choice == "3":
-        print("Running with animation...")
-        model, anim = run_simulation_with_animation()
-        plt.show()
-    else:
-        print("Invalid choice. Running default option (animation)...")
-        model, anim = run_simulation_with_animation()
-        plt.show()
+    # if choice == "1":
+    #     print("Running simulation and sending to Unity...")
+    #run_simulation_and_send_json()
+    # elif choice == "2":
+    #     filename = input("Enter filename (default: traffic_simulation.json): ").strip()
+    #     if not filename:
+    #         filename = "traffic_simulation.json"
+    #     print(f"Running simulation and saving to {filename}...")
+    #     run_simulation_and_save_json(filename)
+    # elif choice == "3":
+    #     print("Running with animation...")
+    #     model, anim = run_simulation_with_animation()
+    #     plt.show()
+    # else:
+    #     print("Invalid choice. Running default option (animation)...")
+    #     model, anim = run_simulation_with_animation()
+    #     plt.show()
