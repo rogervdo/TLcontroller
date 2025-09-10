@@ -46,9 +46,11 @@ JSON Data Structure:
 
 # Simulation parameters
 params = {
-    "steps": 500,
+    "steps": 100,
     "spawn_rate": 1,  # Probability of spawning a car each step
     "world_size": 500,  # World boundaries (0 to world_size)
+    "preset": "morning",  # Traffic preset: "morning", "evening", "night"
+    "animation": True,  # Save to gif
 }
 
 
@@ -570,7 +572,7 @@ class TrafficModel(ap.Model):
     def setup(self):
         # Create road network
         self.road_network = RoadNetwork()
-        self.road_network.create_simple_network(params["world_size"])
+        self.road_network.create_simple_network(self.p["world_size"])
 
         # Initialize node occupancy
         self.node_occupancy = {node_id: None for node_id in self.road_network.nodes}
@@ -595,14 +597,44 @@ class TrafficModel(ap.Model):
         ]
 
         # Spawn-destination restrictions mapping with percentages
-        self.spawn_destinations = {
-            "-2_14": {"18_26": 1.0},
-            "-2_12": {"6_3": 41, "8_2": 116, "26_12": 67},
-            "8_26": {"2_16": 280, "18_26": 236, "6_3": 164, "8_2": 49, "26_12": 35},
-            "18_2": {"8_2": 214, "18_26": 68, "2_16": 622, "6_3": 34},
-            "22_4": {"26_12": 1.0},
-            "30_15": {"18_26": 82, "2_16": 162, "6_3": 24, "8_2": 89},
+        # Define presets for different times of day
+        self.traffic_presets = {
+            "morning": {
+                "-2_14": {"18_26": 294},
+                "-2_12": {"6_3": 41, "8_2": 116, "26_12": 67},
+                "8_26": {"2_16": 280, "18_26": 236, "6_3": 164, "8_2": 49, "26_12": 35},
+                "18_2": {"8_2": 214, "18_26": 68, "2_16": 622, "6_3": 34},
+                "22_4": {"26_12": 177},
+                "30_15": {"18_26": 82, "2_16": 162, "6_3": 24, "8_2": 89},
+            },
+            "evening": {
+                "-2_14": {"18_26": 444},
+                "-2_12": {"6_3": 28, "8_2": 183, "26_12": 88},
+                "8_26": {"2_16": 190, "18_26": 428, "6_3": 38, "8_2": 75, "26_12": 84},
+                "18_2": {"8_2": 360, "18_26": 81, "2_16": 239, "6_3": 138},
+                "22_4": {"26_12": 83},
+                "30_15": {"18_26": 105, "2_16": 138, "6_3": 14, "8_2": 154},
+            },
+            "night": {
+                "-2_14": {"18_26": 490},
+                "-2_12": {"6_3": 41, "8_2": 226, "26_12": 134},
+                "8_26": {"2_16": 243, "18_26": 609, "6_3": 52, "8_2": 94, "26_12": 133},
+                "18_2": {"8_2": 219, "18_26": 76, "2_16": 470, "6_3": 179},
+                "22_4": {"26_12": 131},
+                "30_15": {"18_26": 108, "2_16": 179, "6_3": 7, "8_2": 165},
+            },
         }
+
+        # Set the active preset based on parameters
+        preset_name = self.p.get("preset", "morning")
+        if preset_name not in self.traffic_presets:
+            print(
+                f"Warning: Preset '{preset_name}' not found, using 'morning' as default"
+            )
+            preset_name = "morning"
+
+        self.spawn_destinations = self.traffic_presets[preset_name]
+        print(f"Using traffic preset: {preset_name}")
 
     def step(self):
         # Cycle traffic light groups every 5 steps
@@ -612,35 +644,60 @@ class TrafficModel(ap.Model):
 
         # Spawn new cars with restricted destinations
         if (
-            random.random() < params["spawn_rate"]
+            random.random() < self.p["spawn_rate"]
             and self.road_network.spawn_nodes
             and self.road_network.destination_nodes
         ):
-            spawn_node = random.choice(self.road_network.spawn_nodes)
+            # Calculate spawn weights based on total route capacity for each spawn point
+            spawn_weights = []
+            valid_spawn_nodes = []
 
-            # Get destination probabilities for this spawn point
-            dest_probs = self.spawn_destinations.get(spawn_node, {})
+            for spawn_node in self.road_network.spawn_nodes:
+                dest_probs = self.spawn_destinations.get(spawn_node, {})
+                # Filter to only include destinations that exist in the network
+                available_dests = {
+                    dest: prob
+                    for dest, prob in dest_probs.items()
+                    if dest in self.road_network.destination_nodes
+                }
 
-            # Filter to only include destinations that exist in the network
-            available_dests = {
-                dest: prob
-                for dest, prob in dest_probs.items()
-                if dest in self.road_network.destination_nodes
-            }
+                if available_dests:
+                    # Use sum of route weights as the spawn weight for this spawn point
+                    total_weight = sum(available_dests.values())
+                    spawn_weights.append(total_weight)
+                    valid_spawn_nodes.append(spawn_node)
 
-            if available_dests:
-                destinations = list(available_dests.keys())
-                probabilities = list(available_dests.values())
-                dest_node = random.choices(destinations, weights=probabilities, k=1)[0]
-                new_car = Car(self, start_node_id=spawn_node, target_node_id=dest_node)
-                self.cars.append(new_car)
-                self.total_cars_spawned += 1
+            if valid_spawn_nodes:
+                # Select spawn point weighted by total route capacity
+                spawn_node = random.choices(
+                    valid_spawn_nodes, weights=spawn_weights, k=1
+                )[0]
 
-                # Debug output to show car assignments
-                if self.t % 50 == 0:  # Print every 50 steps to avoid spam
-                    print(
-                        f"Car {self.total_cars_spawned} spawned: {spawn_node} → {dest_node}"
+                # Get destination probabilities for the selected spawn point
+                dest_probs = self.spawn_destinations.get(spawn_node, {})
+                available_dests = {
+                    dest: prob
+                    for dest, prob in dest_probs.items()
+                    if dest in self.road_network.destination_nodes
+                }
+
+                if available_dests:
+                    destinations = list(available_dests.keys())
+                    probabilities = list(available_dests.values())
+                    dest_node = random.choices(
+                        destinations, weights=probabilities, k=1
+                    )[0]
+                    new_car = Car(
+                        self, start_node_id=spawn_node, target_node_id=dest_node
                     )
+                    self.cars.append(new_car)
+                    self.total_cars_spawned += 1
+
+                    # Debug output to show car assignments
+                    if self.t % 50 == 0:  # Print every 50 steps to avoid spam
+                        print(
+                            f"Car {self.total_cars_spawned} spawned: {spawn_node} → {dest_node}"
+                        )
 
         # Update all cars
         arrived_cars = []
@@ -672,8 +729,8 @@ class TrafficModel(ap.Model):
 def draw_simulation(model, ax):
     """Draw the current state of the simulation"""
     ax.clear()
-    ax.set_xlim(-50, params["world_size"])
-    ax.set_ylim(0, params["world_size"])
+    ax.set_xlim(-50, model.p["world_size"])
+    ax.set_ylim(0, model.p["world_size"])
     ax.set_aspect("equal")
     ax.set_title(f"Node-Based Traffic Simulation - Step {model.t}")
 
@@ -963,7 +1020,6 @@ def get_simulation_data(model):
     # Run the simulation
 
     # To save as GIF (uncomment the line below):
-#anim.save("Traffic.gif", writer="pillow", fps=5)
 
     # Print some sample data for Unity integration
     # print("\nSample data structure for Unity:")
@@ -1095,29 +1151,6 @@ def run_simulation_and_send_json():
     print("ENVIADO A UNITY EXITOSAMENTE!!!!!! YAY")
 
 
-def send_current_simulation_state_to_unity(model, host="localhost", port=1101):
-    """Send the current simulation state to Unity in real-time"""
-    sender = TCPSender(host, port)
-    if sender.connect():
-        # Get current simulation data
-        data = get_simulation_data(model)
-        data["timestamp"] = model.t  # Add timestamp for real-time updates
-
-        # Convert to JSON and send
-        json_str = json.dumps(data)
-        size = len(json_str.encode("utf-8"))
-
-        # Send size first (4 bytes)
-        sender.socket.sendall(size.to_bytes(4, byteorder="big"))
-        # Then send the JSON data
-        sender.socket.sendall(json_str.encode("utf-8"))
-        print(f"Sent current simulation state ({size} bytes) to Unity")
-
-        sender.disconnect()
-        return True
-    return False
-
-
 def run_simulation_and_save_json(filename="traffic_simulation.json"):
     """Run simulation and save to JSON file without sending to Unity"""
     frames = []
@@ -1155,32 +1188,26 @@ def run_simulation_and_save_json(filename="traffic_simulation.json"):
     return model
 
 
-#if __name__ == "__main__":
-run_simulation_and_send_json()
-    # print("Traffic Simulation with Unity Integration")
-    # print("=" * 50)
-    # print("Options:")
-    # print("1. Run simulation and send to Unity")
-    # print("2. Run simulation and save to JSON only")
-    # print("3. Run with animation (no Unity integration)")
-    # print("=" * 50)
+if __name__ == "__main__":
+    print("Traffic Simulation with Unity Integration")
+    print("=" * 50)
 
-    # choice = input("Choose option (1-3): ").strip()
+    # Get preset choice
+    preset_choice = input("Choose traffic preset (1-3, default: 1): ").strip()
+    if preset_choice == "1" or preset_choice == "":
+        params["preset"] = "morning"
+    elif preset_choice == "2":
+        params["preset"] = "evening"
+    elif preset_choice == "3":
+        params["preset"] = "night"
+    else:
+        print("Invalid preset choice, using morning as default")
+        params["preset"] = "morning"
 
-    # if choice == "1":
-    #     print("Running simulation and sending to Unity...")
-    #run_simulation_and_send_json()
-    # elif choice == "2":
-    #     filename = input("Enter filename (default: traffic_simulation.json): ").strip()
-    #     if not filename:
-    #         filename = "traffic_simulation.json"
-    #     print(f"Running simulation and saving to {filename}...")
-    #     run_simulation_and_save_json(filename)
-    # elif choice == "3":
-    #     print("Running with animation...")
-    #     model, anim = run_simulation_with_animation()
-    #     plt.show()
-    # else:
-    #     print("Invalid choice. Running default option (animation)...")
-    #     model, anim = run_simulation_with_animation()
-    #     plt.show()
+
+    run_simulation_and_send_json()
+
+    if params.animation == True:
+        model, anim = run_simulation_with_animation()
+        plt.show()
+        anim.save("Traffic4.gif", writer="pillow", fps=1)
