@@ -1,4 +1,4 @@
-positions = {
+POSITIONS = {
     "8_2": (49, -99),
     "8_4": (48, -64.7),
     "8_6": (47, -28.4),
@@ -87,7 +87,7 @@ positions = {
     "4_15": (-20, 175),
     "18_17": (178, 160),
 }
-nodes_list = [
+NODES_LIST = [
     ("8_2", "destination", None),
     ("8_4", "intersection", None),
     ("8_6", "intersection", None),
@@ -182,7 +182,7 @@ nodes_list = [
     ("4_15", "intersection", None),
     ("18_17", "intersection", None),
 ]
-connections = [
+CONNECTIONS = [
     # Left path (8,x) connections
     ("8_4", "8_2"),  # 8,4 > 8,2 END
     ("8_6", "8_4"),  # 8,6 > 8,4
@@ -292,4 +292,14 @@ connections = [
     ("22_10", "22_12"),
     ("18_17", "16_17"),
     ("18_17", "18_18"),
+]
+STOPLIGHT_NODES = [
+    "8_16",
+    "8_14",
+    "8_12",
+    "18_16",
+    "18_14",
+    "18_12",
+    "8_15",
+    "18_17",
 ]

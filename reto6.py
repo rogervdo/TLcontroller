@@ -16,26 +16,11 @@ except ImportError:
     HEURISTICS_AVAILABLE = False
     print("Warning: traffic_heuristics module not found. Running without heuristics.")
 
-from puntos import positions, nodes_list, connections
+from puntos import POSITIONS, NODES_LIST, CONNECTIONS, STOPLIGHT_NODES
 from legend import legend_elements
 
 """
 Traffic Simulation with Unity Integration
-
-This script provides a comprehensive traffic simulation with the ability to send data to Unity for visualization.
-
-Features:
-- Node-based road network with A* pathfinding
-- Traffic lights with cycling groups
-- Yield behaviors at merge points
-- Weighted destination spawning
-- Real-time JSON data export for Unity integration
-
-Unity Integration:
-- Use run_simulation_and_send_json() to run simulation and send complete data to Unity
-- Use send_current_simulation_state_to_unity(model) for real-time state updates
-- Use run_simulation_and_save_json() to save data without sending to Unity
-- Data includes: car positions, states, spawn/target nodes, traffic light groups, and network topology
 
 JSON Data Structure:
 {
@@ -53,9 +38,6 @@ JSON Data Structure:
     ]
 }
 """
-
-# Simulation parameters
-
 # Simulation parameters
 params = {
     "steps": 100,
@@ -271,16 +253,7 @@ class Car(ap.Agent):
         # Check if next node is occupied
         if self.model.node_occupancy[next_node_id] is not None:
             # Check if we're currently on a traffic light node
-            stoplight_nodes = [
-                "8_16",
-                "8_14",
-                "8_12",
-                "18_16",
-                "18_14",
-                "18_12",
-                "8_15",
-            ]
-            if self.current_node_id in stoplight_nodes:
+            if self.current_node_id in STOPLIGHT_NODES:
                 # Try to find an alternative route avoiding the blocked node
                 alternative_path = self.find_alternative_path(next_node_id)
                 if alternative_path and len(alternative_path) > 1:
@@ -312,16 +285,7 @@ class Car(ap.Agent):
         # Group check for stoplight functionality
         current_node = self.model.road_network.nodes[self.current_node_id]
         if current_node.group_id is not None:
-            stoplight_nodes = [
-                "8_16",
-                "8_15",
-                "8_14",
-                "8_12",
-                "18_16",
-                "18_14",
-                "18_12",
-            ]  # Example stoplight nodes
-            if next_node_id in stoplight_nodes:
+            if next_node_id in STOPLIGHT_NODES:
                 if current_node.group_id != self.model.active_group:
                     # Cannot move - increment waiting steps
                     self.waiting_steps += 1
@@ -364,28 +328,18 @@ class RoadNetwork:
         elif node_type == "destination":
             self.destination_nodes.append(node_id)
 
-    def add_edge(self, node_id1, node_id2):
-        """Add bidirectional connection between two nodes"""
-        if node_id1 in self.nodes and node_id2 in self.nodes:
-            pos1 = self.nodes[node_id1].get_position()
-            pos2 = self.nodes[node_id2].get_position()
-            distance = np.linalg.norm(pos2 - pos1)
-
-            self.nodes[node_id1].add_connection(node_id2, distance)
-            self.nodes[node_id2].add_connection(node_id1, distance)
-
     def create_simple_network(self, world_size):
         # Additional new path nodes (user request)
 
         # New path nodes (user request)
         """Create custom road network based on specified layout"""
-        # Manual positions for nodes, independent of x,y calculations
-        for node_id, node_type, group_id in nodes_list:
-            x, y = positions[node_id]
+        # Manual POSITIONS for nodes, independent of x,y calculations
+        for node_id, node_type, group_id in NODES_LIST:
+            x, y = POSITIONS[node_id]
             self.add_node(node_id, x, y, node_type, group_id)
 
         # Add all connections as directed edges
-        for node1, node2 in connections:
+        for node1, node2 in CONNECTIONS:
             if node1 in self.nodes and node2 in self.nodes:
                 pos1 = self.nodes[node1].get_position()
                 pos2 = self.nodes[node2].get_position()
@@ -717,19 +671,9 @@ def draw_simulation(model, ax):
     ax.set_title(f"Node-Based Traffic Simulation - Step {model.t}")
 
     # Draw network nodes
-    stoplight_nodes = [
-        "8_16",
-        "8_14",
-        "8_12",
-        "18_16",
-        "18_14",
-        "18_12",
-        "8_15",
-        "18_17",
-    ]
     group_colors = {0: "orange", 1: "purple", 2: "cyan"}
     for node_id, node in model.road_network.nodes.items():
-        if node_id in stoplight_nodes:
+        if node_id in STOPLIGHT_NODES:
             # Highlight stoplight nodes with active group color
             color = group_colors.get(model.active_group, "yellow")
         elif node.group_id is not None:
