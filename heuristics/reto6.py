@@ -382,7 +382,7 @@ class TrafficModelBase(ap.Model):
 
         # Traffic light state
         self.active_group = 0  # Start with group 0
-        self.group_cycle_steps = 5  # Switch every 5 steps
+        self.group_cycle_steps = 9  # Switch every 5 steps
         self.traffic_light_counter = 0  # Counter for regular traffic light changes
 
         # Yield rules for merge points
@@ -427,11 +427,7 @@ class TrafficModelBase(ap.Model):
                     self.adjust_timer_based_on_traffic()
 
         # Spawn new cars with restricted destinations
-        if (
-            random.random() < self.p["spawn_rate"]
-            and self.road_network.spawn_nodes
-            and self.road_network.destination_nodes
-        ):
+        if self.road_network.spawn_nodes and self.road_network.destination_nodes:
             # Calculate spawn weights based on total route capacity for each spawn point
             spawn_weights = []
             valid_spawn_nodes = []
@@ -452,36 +448,38 @@ class TrafficModelBase(ap.Model):
                     valid_spawn_nodes.append(spawn_node)
 
             if valid_spawn_nodes:
-                # Select spawn point weighted by total route capacity
-                spawn_node = random.choices(
-                    valid_spawn_nodes, weights=spawn_weights, k=1
-                )[0]
-
-                # Get destination probabilities for the selected spawn point
-                dest_probs = self.spawn_destinations.get(spawn_node, {})
-                available_dests = {
-                    dest: prob
-                    for dest, prob in dest_probs.items()
-                    if dest in self.road_network.destination_nodes
-                }
-
-                if available_dests:
-                    destinations = list(available_dests.keys())
-                    probabilities = list(available_dests.values())
-                    dest_node = random.choices(
-                        destinations, weights=probabilities, k=1
+                num_to_spawn = np.random.poisson(self.p["spawn_rate"])
+                for _ in range(num_to_spawn):
+                    # Select spawn point weighted by total route capacity
+                    spawn_node = random.choices(
+                        valid_spawn_nodes, weights=spawn_weights, k=1
                     )[0]
-                    new_car = Car(
-                        self, start_node_id=spawn_node, target_node_id=dest_node
-                    )
-                    self.cars.append(new_car)
-                    self.total_cars_spawned += 1
 
-                    # Debug output to show car assignments
-                    if self.t % 50 == 0:  # Print every 50 steps to avoid spam
-                        print(
-                            f"Car {self.total_cars_spawned} spawned: {spawn_node} → {dest_node}"
+                    # Get destination probabilities for the selected spawn point
+                    dest_probs = self.spawn_destinations.get(spawn_node, {})
+                    available_dests = {
+                        dest: prob
+                        for dest, prob in dest_probs.items()
+                        if dest in self.road_network.destination_nodes
+                    }
+
+                    if available_dests:
+                        destinations = list(available_dests.keys())
+                        probabilities = list(available_dests.values())
+                        dest_node = random.choices(
+                            destinations, weights=probabilities, k=1
+                        )[0]
+                        new_car = Car(
+                            self, start_node_id=spawn_node, target_node_id=dest_node
                         )
+                        self.cars.append(new_car)
+                        self.total_cars_spawned += 1
+
+                        # Debug output to show car assignments
+                        if self.t % 50 == 0:  # Print every 50 steps to avoid spam
+                            print(
+                                f"Car {self.total_cars_spawned} spawned: {spawn_node} → {dest_node}"
+                            )
 
         # Update all cars
         arrived_cars = []
@@ -1121,4 +1119,4 @@ if __name__ == "__main__":
         run_simulation_and_send_json()
 
         if params["animation"]:
-            model, anim = run_simulation_with_animation("H6_Traffic2.gif")
+            model, anim = run_simulation_with_animation("H6_Traffic.gif")

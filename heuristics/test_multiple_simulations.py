@@ -15,7 +15,7 @@ def test_comparative_analysis():
     print("Testing comparative heuristics vs no heuristics analysis...")
 
     # Run comparative analysis with 3 runs and 50 steps each for quick testing
-    results = run_multiple_simulations_and_plot(num_runs=5, steps=300)
+    results = run_multiple_simulations_and_plot(num_runs=30, steps=1000)
 
     print("\nComparative analysis completed successfully!")
     print("Results keys:", list(results.keys()))
