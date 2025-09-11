@@ -729,8 +729,9 @@ class TrafficModel(ap.Model):
 def draw_simulation(model, ax):
     """Draw the current state of the simulation"""
     ax.clear()
-    ax.set_xlim(-50, model.p["world_size"])
-    ax.set_ylim(0, model.p["world_size"])
+    # Set axis limits to show all nodes with some padding
+    ax.set_xlim(-200, 450)
+    ax.set_ylim(-150, 450)
     ax.set_aspect("equal")
     ax.set_title(f"Node-Based Traffic Simulation - Step {model.t}")
 
