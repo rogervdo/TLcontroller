@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 
-legend_elements = [
+LEGEND_ELEMENTS = [
     plt.Line2D(
         [0],
         [0],

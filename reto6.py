@@ -16,8 +16,16 @@ except ImportError:
     HEURISTICS_AVAILABLE = False
     print("Warning: traffic_heuristics module not found. Running without heuristics.")
 
-from puntos import POSITIONS, NODES_LIST, CONNECTIONS, STOPLIGHT_NODES
-from legend import legend_elements
+from puntos import (
+    POSITIONS,
+    NODES_LIST,
+    CONNECTIONS,
+    STOPLIGHT_NODES,
+    GROUP_NODES,
+    TRAFFIC_PRESETS,
+)
+
+from legend import LEGEND_ELEMENTS
 
 """
 Traffic Simulation with Unity Integration
@@ -385,89 +393,8 @@ class TrafficModelBase(ap.Model):
             {"yield": "10_7", "merge": "8_6", "priority": "8_8"},
         ]
 
-        # Nodes for heuristics-based traffic light control (organized by traffic light controllers)
-        self.group_nodes = {
-            0: [
-                # 8_18 controller and upstream
-                "8_18",
-                "8_20",
-                "8_22",
-                "8_24",
-                # 18_10 controller and upstream
-                "18_10",
-                "18_8",
-                "18_6",
-                "18_4",
-            ],
-            1: [
-                # 6_14 controller and upstream
-                "6_14",
-                "4_14",
-                "2_14",
-                "0_14",
-                # 6_12 controller and upstream
-                "6_12",
-                "4_12",
-                "2_12",
-                "0_12",
-                # 16_13 controller and upstream
-                "16_13",
-                "14_12",
-                "12_12",
-                "10_13",
-                # 16_11 controller and upstream
-                "16_11",
-                "14_10",
-                "12_10",
-                "10_11",
-            ],
-            2: [
-                # 20_15 controller and upstream
-                "20_15",
-                "22_15",
-                "24_15",
-                "26_15",
-                # 10_15 controller and upstream
-                "10_15",
-                "12_16",
-                "14_16",
-                "16_15",
-                # 10_17 controller and upstream
-                "10_17",
-                "12_18",
-                "14_18",
-                "16_17",
-            ],
-        }
-
-        # Spawn-destination restrictions mapping with percentages
-        # Define presets for different times of day
-        self.traffic_presets = {
-            "morning": {
-                "-2_14": {"18_26": 294},
-                "-2_12": {"6_3": 41, "8_2": 116, "26_12": 67},
-                "8_26": {"2_16": 280, "18_26": 236, "6_3": 164, "8_2": 49, "26_12": 35},
-                "18_2": {"8_2": 214, "18_26": 68, "2_16": 622, "6_3": 34},
-                "22_4": {"26_12": 177},
-                "30_15": {"18_26": 82, "2_16": 162, "6_3": 24, "8_2": 89},
-            },
-            "evening": {
-                "-2_14": {"18_26": 444},
-                "-2_12": {"6_3": 28, "8_2": 183, "26_12": 88},
-                "8_26": {"2_16": 190, "18_26": 428, "6_3": 38, "8_2": 75, "26_12": 84},
-                "18_2": {"8_2": 360, "18_26": 81, "2_16": 239, "6_3": 138},
-                "22_4": {"26_12": 83},
-                "30_15": {"18_26": 105, "2_16": 138, "6_3": 14, "8_2": 154},
-            },
-            "night": {
-                "-2_14": {"18_26": 490},
-                "-2_12": {"6_3": 41, "8_2": 226, "26_12": 134},
-                "8_26": {"2_16": 243, "18_26": 609, "6_3": 52, "8_2": 94, "26_12": 133},
-                "18_2": {"8_2": 219, "18_26": 76, "2_16": 470, "6_3": 179},
-                "22_4": {"26_12": 131},
-                "30_15": {"18_26": 108, "2_16": 179, "6_3": 7, "8_2": 165},
-            },
-        }
+        self.group_nodes = GROUP_NODES
+        self.traffic_presets = TRAFFIC_PRESETS
 
         # Set the active preset based on parameters
         preset_name = self.p.get("preset", "morning")
@@ -739,7 +666,7 @@ def draw_simulation(model, ax):
         )
 
     # Add legend
-    ax.legend(handles=legend_elements, loc="upper right")
+    ax.legend(handles=LEGEND_ELEMENTS, loc="upper right")
 
 
 def run_simulation_with_animation(filename="Traffic4.gif"):
