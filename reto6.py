@@ -16,6 +16,9 @@ except ImportError:
     HEURISTICS_AVAILABLE = False
     print("Warning: traffic_heuristics module not found. Running without heuristics.")
 
+from puntos import positions, nodes_list, connections
+from legend import legend_elements
+
 """
 Traffic Simulation with Unity Integration
 
@@ -93,6 +96,9 @@ class Car(ap.Agent):
         self.path = []  # Will store the path as list of node IDs
         self.current_path_index = 0
         self.state = "moving"  # 'moving', 'arrived'
+
+        # Add waiting steps tracking
+        self.waiting_steps = 0  # Track how many steps this car has been waiting
 
         # Assign color based on spawn node
         spawn_colors = {
@@ -287,14 +293,20 @@ class Car(ap.Agent):
                     next_node_id = self.path[self.current_path_index + 1]
                     next_node = self.model.road_network.nodes[next_node_id]
                 else:
+                    # Cannot move - increment waiting steps
+                    self.waiting_steps += 1
                     return  # No alternative route found, wait
             else:
+                # Cannot move - increment waiting steps
+                self.waiting_steps += 1
                 return  # Not on traffic light, wait for node to be free
 
         # Yield check for merge points
         for rule in self.model.yield_rules:
             if self.current_node_id == rule["yield"] and next_node_id == rule["merge"]:
                 if self.model.node_occupancy[rule["priority"]] is not None:
+                    # Cannot move - increment waiting steps
+                    self.waiting_steps += 1
                     return  # Yield to priority car
 
         # Group check for stoplight functionality
@@ -311,12 +323,16 @@ class Car(ap.Agent):
             ]  # Example stoplight nodes
             if next_node_id in stoplight_nodes:
                 if current_node.group_id != self.model.active_group:
+                    # Cannot move - increment waiting steps
+                    self.waiting_steps += 1
                     return  # Wait for green light
 
                 # Additional congestion check - even if it's our turn, check for congestion ahead
                 if self.model.check_congestion_ahead(
                     self.current_node_id, next_node_id
                 ):
+                    # Cannot move - increment waiting steps
+                    self.waiting_steps += 1
                     return  # Wait due to congestion ahead
 
         # Move to next node instantly
@@ -364,306 +380,9 @@ class RoadNetwork:
         # New path nodes (user request)
         """Create custom road network based on specified layout"""
         # Manual positions for nodes, independent of x,y calculations
-        positions = {
-            "8_2": (49, -99),
-            "8_4": (48, -64.7),
-            "8_6": (47, -28.4),
-            "8_8": (47, 12),
-            "8_10": (47, 51),
-            "8_12": (47, 83),
-            "8_14": (48, 117),
-            "8_15": (49, 150),
-            "8_16": (49, 175),
-            "8_18": (50, 200),
-            "8_20": (49.6, 244),
-            "8_22": (49, 303),
-            "8_24": (49, 350),
-            "8_26": (48, 397),
-            "18_2": (176.6, -95.8),
-            "18_4": (175, -11),
-            "18_6": (172.3, -57),
-            "18_8": (173, -3),
-            "18_10": (172, 36.9),
-            "18_12": (171, 57),
-            "18_14": (170.8, 79),
-            "18_16": (173, 140),
-            "18_18": (172, 196),
-            "18_20": (172.7, 244),
-            "18_22": (170, 307),
-            "7_19": (28, 226.6),
-            "5_17": (9.5, 209),
-            "4_16": (-20, 190),
-            "-2_14": (-160, 195.7),
-            "0_14": (-122, 184),
-            "2_14": (-78, 170),
-            "4_14": (-38, 157.7),
-            "6_14": (12.7, 138.5),
-            "-2_12": (-173, 162),
-            "0_12": (-126, 150.9),
-            "2_12": (-82.5, 138),
-            "4_12": (-40.7, 126.4),
-            "6_12": (-3, 112.9),
-            "30_15": (408, 55),
-            "28_15": (361, 72),
-            "26_15": (327, 85),
-            "24_15": (295, 99),
-            "22_15": (261, 118),
-            "20_15": (223, 125),
-            "10_13": (72.3, 87),
-            "12_12": (94.2, 78),
-            "14_12": (126, 71.9),
-            "16_13": (150, 73.1),
-            "6_16": (9.2, 181.7),
-            "2_16": (-65, 193),
-            "20_12": (214, 52.7),
-            "22_12": (256, 36.6),
-            "24_12": (285.6, 23.5),
-            "26_12": (328, 8.9),
-            "18_24": (169, 364),
-            "18_26": (168, 403),
-            "10_11": (70, 67),
-            "12_10": (95, 56),
-            "14_10": (125, 49.9),
-            "16_11": (151, 51),
-            "16_17": (159, 175),
-            "14_18": (136, 187),
-            "12_18": (108, 194),
-            "10_17": (81, 189),
-            "16_7": (153.7, -28.3),
-            "14_8": (130, -16),
-            "12_8": (97.7, -18),
-            "10_7": (72.3, -34),
-            "10_21": (76.5, 269),
-            "12_20": (102, 260),
-            "14_20": (137, 266),
-            "16_21": (157, 276),
-            "16_15": (160, 155),
-            "14_16": (140, 165),
-            "12_16": (107, 173),
-            "10_15": (75, 169),
-            "6_9": (-9, 66),
-            "6_7": (-4.7, 28.9),
-            "6_5": (-0.5, -12.1),
-            "6_3": (2.9, -80),
-            "22_4": (239, -110),
-            "22_6": (240, -73),
-            "22_8": (241, -12),
-            "22_10": (249, 19),
-            "6_15": (7, 180),
-            "4_15": (-20, 175),
-            "18_17": (178, 160),
-        }
-        nodes_list = [
-            ("8_2", "destination", None),
-            ("8_4", "intersection", None),
-            ("8_6", "intersection", None),
-            ("8_8", "intersection", None),
-            ("8_10", "intersection", None),
-            ("8_12", "intersection", None),
-            ("8_14", "intersection", None),
-            ("8_15", "intersection", None),
-            ("8_16", "intersection", None),
-            ("8_18", "intersection", 0),
-            ("8_20", "intersection", None),
-            ("8_22", "intersection", None),
-            ("8_24", "intersection", None),
-            ("8_26", "spawn", None),
-            ("18_2", "spawn", None),
-            ("18_4", "intersection", None),
-            ("18_6", "intersection", None),
-            ("18_8", "intersection", None),
-            ("18_10", "intersection", 0),
-            ("18_12", "intersection", None),
-            ("18_14", "intersection", None),
-            ("18_16", "intersection", None),
-            ("18_18", "intersection", None),
-            ("18_20", "intersection", None),
-            ("18_22", "intersection", None),
-            ("7_19", "intersection", None),
-            ("5_17", "intersection", None),
-            ("4_16", "intersection", None),
-            ("-2_14", "spawn", None),
-            ("0_14", "intersection", None),
-            ("2_14", "intersection", None),
-            ("4_14", "intersection", None),
-            ("6_14", "intersection", 1),
-            ("8_14", "intersection", None),
-            ("-2_12", "spawn", None),
-            ("0_12", "intersection", None),
-            ("2_12", "intersection", None),
-            ("4_12", "intersection", None),
-            ("6_12", "intersection", 1),
-            ("8_12", "intersection", None),
-            ("30_15", "spawn", None),
-            ("28_15", "intersection", None),
-            ("26_15", "intersection", None),
-            ("24_15", "intersection", None),
-            ("22_15", "intersection", None),
-            ("20_15", "intersection", 2),
-            ("10_13", "intersection", None),
-            ("12_12", "intersection", None),
-            ("14_12", "intersection", None),
-            ("16_13", "intersection", 1),
-            ("18_14", "intersection", None),
-            ("6_16", "intersection", None),
-            ("4_16", "intersection", None),
-            ("2_16", "destination", None),
-            ("20_12", "intersection", None),
-            ("22_12", "intersection", None),
-            ("24_12", "intersection", None),
-            ("26_12", "destination", None),
-            ("18_24", "intersection", None),
-            ("18_26", "destination", None),
-            ("10_11", "intersection", None),
-            ("12_10", "intersection", None),
-            ("14_10", "intersection", None),
-            ("16_11", "intersection", 1),
-            ("16_17", "intersection", None),
-            ("14_18", "intersection", None),
-            ("12_18", "intersection", None),
-            ("10_17", "intersection", 2),
-            ("16_7", "intersection", None),
-            ("14_8", "intersection", None),
-            ("12_8", "intersection", None),
-            ("10_7", "intersection", None),
-            ("10_21", "intersection", None),
-            ("12_20", "intersection", None),
-            ("14_20", "intersection", None),
-            ("16_21", "intersection", None),
-            ("18_22", "intersection", None),
-            ("16_15", "intersection", None),
-            ("14_16", "intersection", None),
-            ("12_16", "intersection", None),
-            ("10_15", "intersection", 2),
-            ("6_9", "intersection", None),
-            ("6_7", "intersection", None),
-            ("6_5", "intersection", None),
-            ("6_3", "destination", None),
-            ("22_4", "spawn", None),
-            ("22_6", "intersection", None),
-            ("22_8", "intersection", None),
-            ("22_10", "intersection", None),
-            ("22_12", "intersection", None),
-            ("6_15", "intersection", None),
-            ("4_15", "intersection", None),
-            ("18_17", "intersection", None),
-        ]
         for node_id, node_type, group_id in nodes_list:
             x, y = positions[node_id]
             self.add_node(node_id, x, y, node_type, group_id)
-
-        # Define all connections based on your specification
-        connections = [
-            # Left path (8,x) connections
-            ("8_4", "8_2"),  # 8,4 > 8,2 END
-            ("8_6", "8_4"),  # 8,6 > 8,4
-            ("8_8", "8_6"),  # 8,8 > 8,6
-            ("8_10", "8_8"),  # 8,10 > 8,8
-            ("8_12", "10_11"),  # 8,12 > 10,11 (to roundabout)
-            ("8_12", "8_10"),
-            ("8_14", "8_12"),  # 8,14 > 8,12
-            ("8_16", "8_15"),  # 8,16 > 8,14
-            ("8_15", "8_14"),
-            ("8_15", "6_15"),
-            ("6_15", "4_15"),
-            ("4_15", "2_16"),
-            ("8_18", "8_16"),  # 8,18 > 8,16
-            ("8_20", "8_18"),  # 8,20 > 8,18
-            ("8_22", "8_20"),  # 8,22 > 8,20
-            ("8_24", "8_22"),  # 8,24 > 8,22
-            ("8_26", "8_24"),  # 8,26 START > 8,24
-            # Right path (18,x) connections
-            ("18_2", "18_4"),  # 18,2 START > 18,4
-            ("18_4", "18_6"),  # 18,4 > 18,6
-            ("18_6", "18_8"),  # 18,6 > 18,8
-            ("18_8", "18_10"),  # 18,8 > 18,10
-            ("18_10", "18_12"),  # 18,10 > 18,12
-            ("18_12", "18_14"),  # 18,12 > 18,14
-            ("18_14", "18_16"),  # 18,14 > 18,16
-            ("18_16", "16_15"),  # 18,16 > 16,17 (to roundabout)
-            ("18_16", "18_17"),  # 18,16 > 18,18 (alternative)
-            ("18_18", "18_20"),  # 18,18 > 18,20
-            ("18_20", "18_22"),  # 18,20 > 18,22
-            ("18_22", "18_24"),  # 18,22 > 18,24
-            ("18_24", "18_26"),  # 18,24 > 18,26 END
-            # Upper roundabout connections (clockwise)
-            ("10_11", "12_10"),  # 10,11 > 12,10
-            ("12_10", "14_10"),  # 12,10 > 14,10
-            ("14_10", "16_11"),  # 14,10 > 16,11
-            ("16_11", "18_12"),  # 16,11 > 18,12 UN CARRIL
-            # Lower roundabout connections (counter-clockwise)
-            ("16_17", "14_18"),  # 16,17 > 14,18
-            ("14_18", "12_18"),  # 14,18 > 12,18
-            ("12_18", "10_17"),  # 12,18 > 10,17
-            ("10_17", "8_16"),  # 10,17 > 8,16 UN CARRIL
-            # Uturn
-            ("16_7", "14_8"),
-            ("14_8", "12_8"),
-            ("12_8", "10_7"),
-            ("10_7", "8_6"),
-            ("10_21", "12_20"),
-            ("12_20", "14_20"),
-            ("14_20", "16_21"),
-            ("16_21", "18_22"),
-            # Uturn start
-            ("18_6", "16_7"),
-            ("8_22", "10_21"),
-            # New left exit connections
-            ("6_16", "4_16"),
-            ("4_16", "2_16"),
-            # New right exit connections
-            ("20_12", "22_12"),
-            ("22_12", "24_12"),
-            ("24_12", "26_12"),
-            # Connections from previous nodes
-            ("8_16", "6_16"),
-            ("18_12", "20_12"),
-            # User requested connections
-            ("7_19", "5_17"),
-            ("5_17", "4_16"),
-            ("-2_14", "0_14"),
-            ("0_14", "2_14"),
-            ("2_14", "4_14"),
-            ("4_14", "6_14"),
-            ("6_14", "8_14"),
-            ("-2_12", "0_12"),
-            ("0_12", "2_12"),
-            ("2_12", "4_12"),
-            ("4_12", "6_12"),
-            ("6_12", "8_12"),
-            ("30_15", "28_15"),
-            ("28_15", "26_15"),
-            ("26_15", "24_15"),
-            ("24_15", "22_15"),
-            ("22_15", "20_15"),
-            ("20_15", "18_16"),
-            ("10_13", "12_12"),
-            ("12_12", "14_12"),
-            ("14_12", "16_13"),
-            ("16_13", "18_14"),
-            # Connections to existing nodes
-            ("8_20", "7_19"),
-            ("8_14", "10_13"),
-            # User requested new path connections
-            ("16_15", "14_16"),
-            ("14_16", "12_16"),
-            ("12_16", "10_15"),
-            ("10_15", "8_15"),
-            # Connection from existing node
-            ("20_15", "18_17"),
-            # New connections for user request
-            ("6_9", "6_7"),
-            ("6_7", "6_5"),
-            ("6_5", "6_3"),
-            ("8_10", "6_9"),
-            # New connections for 22,x path
-            ("22_4", "22_6"),
-            ("22_6", "22_8"),
-            ("22_8", "22_10"),
-            ("22_10", "22_12"),
-            ("18_17", "16_17"),
-            ("18_17", "18_18"),
-        ]
 
         # Add all connections as directed edges
         for node1, node2 in connections:
@@ -695,6 +414,9 @@ class TrafficModelBase(ap.Model):
         # Statistics
         self.total_cars_spawned = 0
         self.total_cars_arrived = 0
+
+        # Waiting steps tracking
+        self.avg_waiting_steps_history = []  # Track average waiting steps over time
 
         # Traffic light state
         self.active_group = 0  # Start with group 0
@@ -909,12 +631,22 @@ class TrafficModelBase(ap.Model):
                 # Node is free, reset wait time
                 self.node_wait_times[node_id] = 0
 
+        # Calculate average waiting steps across all active cars
+        if len(self.cars) > 0:
+            total_waiting_steps = sum(car.waiting_steps for car in self.cars)
+            avg_waiting_steps = total_waiting_steps / len(self.cars)
+        else:
+            avg_waiting_steps = 0.0
+
+        self.avg_waiting_steps_history.append(avg_waiting_steps)
+
         # Print statistics every 100 steps
         if self.t % 100 == 0 and self.t > 0:
             print(
                 f"Step {self.t}: {len(self.cars)} active cars, "
                 f"{self.total_cars_spawned} spawned, "
-                f"{self.total_cars_arrived} arrived"
+                f"{self.total_cars_arrived} arrived, "
+                f"Avg waiting steps: {avg_waiting_steps:.2f}"
             )
 
     def check_congestion_ahead(self, current_node_id, next_node_id):
@@ -1063,125 +795,6 @@ def draw_simulation(model, ax):
         )
 
     # Add legend
-    legend_elements = [
-        plt.Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="green",
-            markersize=8,
-            label="Spawn Nodes",
-        ),
-        plt.Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="red",
-            markersize=8,
-            label="Destination Nodes",
-        ),
-        plt.Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="blue",
-            markersize=8,
-            label="Intersection Nodes",
-        ),
-        plt.Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="orange",
-            markersize=8,
-            label="Stoplight (Group 0 Active)",
-        ),
-        plt.Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="purple",
-            markersize=8,
-            label="Stoplight (Group 1 Active)",
-        ),
-        plt.Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="cyan",
-            markersize=8,
-            label="Stoplight (Group 2 Active)",
-        ),
-        plt.Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="#4169E1",
-            markersize=6,
-            label="Cars from 8_26",
-        ),
-        plt.Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="#32CD32",
-            markersize=6,
-            label="Cars from 18_2",
-        ),
-        plt.Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="#FF1493",
-            markersize=6,
-            label="Cars from 2_14",
-        ),
-        plt.Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="#FFD700",
-            markersize=6,
-            label="Cars from 2_12",
-        ),
-        plt.Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="#9932CC",
-            markersize=6,
-            label="Cars from 22_4",
-        ),
-        plt.Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="#FF4500",
-            markersize=6,
-            label="Cars from 30_15",
-        ),
-        plt.Line2D(
-            [0],
-            [0],
-            marker=">",
-            color="red",
-            markerfacecolor="red",
-            markersize=8,
-            label="Yield Connection",
-        ),
-    ]
     ax.legend(handles=legend_elements, loc="upper right")
 
 
@@ -1257,6 +870,296 @@ def send_json_file_to_unity(json_file_path, host="localhost", port=1101):
         sender.disconnect()
 
 
+def run_multiple_simulations_and_plot(num_runs=10, steps=None):
+    """
+    Run multiple simulations comparing heuristics vs no heuristics and plot comparative statistics
+
+    Args:
+        num_runs: Number of simulation runs to perform for each mode
+        steps: Number of steps per simulation (uses params["steps"] if None)
+    """
+    if steps is None:
+        steps = params["steps"]
+
+    print(
+        f"Running comparative analysis: {num_runs} simulations with {steps} steps each..."
+    )
+
+    def run_simulation_set(use_heuristics, description):
+        """Run a set of simulations with specified heuristics setting"""
+        print(f"\nRunning {description}...")
+
+        # Store data from all runs
+        all_active_cars = []
+        all_cumulative_arrivals = []
+        all_avg_waiting_steps = []
+
+        for run in range(num_runs):
+            print(f"  Run {run + 1}/{num_runs}...")
+
+            # Create model with specified heuristics setting
+            TrafficModelClass = create_traffic_model_class(
+                use_heuristics=use_heuristics
+            )
+            model = TrafficModelClass(params)
+            model.setup()
+
+            active_cars_data = []
+            cumulative_arrivals_data = []
+            avg_waiting_steps_data = []
+
+            for t in range(steps):
+                model.t = t + 1
+                model.step()
+
+                # Collect data
+                active_cars = len(model.cars)
+                cumulative_arrivals = model.total_cars_arrived
+                avg_waiting_steps = (
+                    model.avg_waiting_steps_history[-1]
+                    if model.avg_waiting_steps_history
+                    else 0.0
+                )
+
+                active_cars_data.append(active_cars)
+                cumulative_arrivals_data.append(cumulative_arrivals)
+                avg_waiting_steps_data.append(avg_waiting_steps)
+
+            all_active_cars.append(active_cars_data)
+            all_cumulative_arrivals.append(cumulative_arrivals_data)
+            all_avg_waiting_steps.append(avg_waiting_steps_data)
+
+        return {
+            "active_cars": np.array(all_active_cars),
+            "cumulative_arrivals": np.array(all_cumulative_arrivals),
+            "avg_waiting_steps": np.array(all_avg_waiting_steps),
+        }
+
+    # Run simulations with and without heuristics
+    heuristics_data = run_simulation_set(
+        use_heuristics=True, description="simulations WITH heuristics"
+    )
+    no_heuristics_data = run_simulation_set(
+        use_heuristics=False, description="simulations WITHOUT heuristics"
+    )
+
+    # Calculate averages and standard deviations
+    h_avg_active = np.mean(heuristics_data["active_cars"], axis=0)
+    h_std_active = np.std(heuristics_data["active_cars"], axis=0)
+    h_avg_arrivals = np.mean(heuristics_data["cumulative_arrivals"], axis=0)
+    h_std_arrivals = np.std(heuristics_data["cumulative_arrivals"], axis=0)
+    h_avg_waiting = np.mean(heuristics_data["avg_waiting_steps"], axis=0)
+    h_std_waiting = np.std(heuristics_data["avg_waiting_steps"], axis=0)
+
+    nh_avg_active = np.mean(no_heuristics_data["active_cars"], axis=0)
+    nh_std_active = np.std(no_heuristics_data["active_cars"], axis=0)
+    nh_avg_arrivals = np.mean(no_heuristics_data["cumulative_arrivals"], axis=0)
+    nh_std_arrivals = np.std(no_heuristics_data["cumulative_arrivals"], axis=0)
+    nh_avg_waiting = np.mean(no_heuristics_data["avg_waiting_steps"], axis=0)
+    nh_std_waiting = np.std(no_heuristics_data["avg_waiting_steps"], axis=0)
+
+    # Create comparative plots
+    fig, ((ax1, ax2, ax3), (ax4, ax5, ax6)) = plt.subplots(2, 3, figsize=(18, 12))
+
+    time_steps = range(1, steps + 1)
+
+    # Plot 1: Active cars comparison
+    ax1.plot(time_steps, h_avg_active, "b-", linewidth=2, label="With Heuristics")
+    ax1.fill_between(
+        time_steps,
+        h_avg_active - h_std_active,
+        h_avg_active + h_std_active,
+        alpha=0.3,
+        color="blue",
+    )
+    ax1.plot(time_steps, nh_avg_active, "r-", linewidth=2, label="Without Heuristics")
+    ax1.fill_between(
+        time_steps,
+        nh_avg_active - nh_std_active,
+        nh_avg_active + nh_std_active,
+        alpha=0.3,
+        color="red",
+    )
+    ax1.set_xlabel("Time Step")
+    ax1.set_ylabel("Number of Active Cars")
+    ax1.set_title("Active Cars Over Time")
+    ax1.grid(True, alpha=0.3)
+    ax1.legend()
+
+    # Plot 2: Cumulative arrivals comparison
+    ax2.plot(time_steps, h_avg_arrivals, "b-", linewidth=2, label="With Heuristics")
+    ax2.fill_between(
+        time_steps,
+        h_avg_arrivals - h_std_arrivals,
+        h_avg_arrivals + h_std_arrivals,
+        alpha=0.3,
+        color="blue",
+    )
+    ax2.plot(time_steps, nh_avg_arrivals, "r-", linewidth=2, label="Without Heuristics")
+    ax2.fill_between(
+        time_steps,
+        nh_avg_arrivals - nh_std_arrivals,
+        nh_avg_arrivals + nh_std_arrivals,
+        alpha=0.3,
+        color="red",
+    )
+    ax2.set_xlabel("Time Step")
+    ax2.set_ylabel("Cumulative Car Arrivals")
+    ax2.set_title("Cumulative Car Arrivals Over Time")
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
+
+    # Plot 3: Average waiting steps comparison
+    ax3.plot(time_steps, h_avg_waiting, "b-", linewidth=2, label="With Heuristics")
+    ax3.fill_between(
+        time_steps,
+        h_avg_waiting - h_std_waiting,
+        h_avg_waiting + h_std_waiting,
+        alpha=0.3,
+        color="blue",
+    )
+    ax3.plot(time_steps, nh_avg_waiting, "r-", linewidth=2, label="Without Heuristics")
+    ax3.fill_between(
+        time_steps,
+        nh_avg_waiting - nh_std_waiting,
+        nh_avg_waiting + nh_std_waiting,
+        alpha=0.3,
+        color="red",
+    )
+    ax3.set_xlabel("Time Step")
+    ax3.set_ylabel("Average Waiting Steps")
+    ax3.set_title("Average Waiting Steps Over Time")
+    ax3.grid(True, alpha=0.3)
+    ax3.legend()
+
+    # Plot 4: Difference in active cars
+    diff_active = h_avg_active - nh_avg_active
+    ax4.plot(
+        time_steps, diff_active, "g-", linewidth=2, label="Heuristics - No Heuristics"
+    )
+    ax4.fill_between(
+        time_steps,
+        diff_active - (h_std_active + nh_std_active),
+        diff_active + (h_std_active + nh_std_active),
+        alpha=0.3,
+        color="green",
+    )
+    ax4.axhline(y=0, color="black", linestyle="--", alpha=0.5)
+    ax4.set_xlabel("Time Step")
+    ax4.set_ylabel("Difference in Active Cars")
+    ax4.set_title("Difference: Heuristics vs No Heuristics\n(Active Cars)")
+    ax4.grid(True, alpha=0.3)
+    ax4.legend()
+
+    # Plot 5: Difference in cumulative arrivals
+    diff_arrivals = h_avg_arrivals - nh_avg_arrivals
+    ax5.plot(
+        time_steps,
+        diff_arrivals,
+        "purple",
+        linewidth=2,
+        label="Heuristics - No Heuristics",
+    )
+    ax5.fill_between(
+        time_steps,
+        diff_arrivals - (h_std_arrivals + nh_std_arrivals),
+        diff_arrivals + (h_std_arrivals + nh_std_arrivals),
+        alpha=0.3,
+        color="purple",
+    )
+    ax5.axhline(y=0, color="black", linestyle="--", alpha=0.5)
+    ax5.set_xlabel("Time Step")
+    ax5.set_ylabel("Difference in Cumulative Arrivals")
+    ax5.set_title("Difference: Heuristics vs No Heuristics\n(Cumulative Arrivals)")
+    ax5.grid(True, alpha=0.3)
+    ax5.legend()
+
+    # Plot 6: Difference in average waiting steps
+    diff_waiting = h_avg_waiting - nh_avg_waiting
+    ax6.plot(
+        time_steps,
+        diff_waiting,
+        "orange",
+        linewidth=2,
+        label="Heuristics - No Heuristics",
+    )
+    ax6.fill_between(
+        time_steps,
+        diff_waiting - (h_std_waiting + nh_std_waiting),
+        diff_waiting + (h_std_waiting + nh_std_waiting),
+        alpha=0.3,
+        color="orange",
+    )
+    ax6.axhline(y=0, color="black", linestyle="--", alpha=0.5)
+    ax6.set_xlabel("Time Step")
+    ax6.set_ylabel("Difference in Average Waiting Steps")
+    ax6.set_title("Difference: Heuristics vs No Heuristics\n(Average Waiting Steps)")
+    ax6.grid(True, alpha=0.3)
+    ax6.legend()
+
+    plt.tight_layout()
+    plt.savefig("traffic_heuristics_comparison.png", dpi=300, bbox_inches="tight")
+    print("Comparative plot saved as 'traffic_heuristics_comparison.png'")
+
+    # Don't show plot in headless environments
+    try:
+        plt.show()
+    except Exception:
+        print("Plot display not available in headless environment")
+
+    # Print comparative summary statistics
+    print("\n" + "=" * 80)
+    print("HEURISTICS VS NO HEURISTICS COMPARISON")
+    print("=" * 80)
+    print(f"Number of runs per mode: {num_runs}")
+    print(f"Steps per simulation: {steps}")
+    print()
+
+    print("FINAL STATISTICS:")
+    print(f"Final active cars with heuristics: {h_avg_active[-1]:.2f}")
+    print(f"Final active cars without heuristics: {nh_avg_active[-1]:.2f}")
+    print(f"Final cumulative arrivals with heuristics: {h_avg_arrivals[-1]:.2f}")
+    print(f"Final cumulative arrivals without heuristics: {nh_avg_arrivals[-1]:.2f}")
+    print(f"Final average waiting steps with heuristics: {h_avg_waiting[-1]:.2f}")
+    print(f"Final average waiting steps without heuristics: {nh_avg_waiting[-1]:.2f}")
+    print()
+
+    print("PERFORMANCE METRICS:")
+    final_active_diff = h_avg_active[-1] - nh_avg_active[-1]
+    final_arrival_diff = h_avg_arrivals[-1] - nh_avg_arrivals[-1]
+    final_waiting_diff = h_avg_waiting[-1] - nh_avg_waiting[-1]
+    efficiency_h = h_avg_arrivals[-1] / (h_avg_arrivals[-1] + h_avg_active[-1]) * 100
+    efficiency_nh = (
+        nh_avg_arrivals[-1] / (nh_avg_arrivals[-1] + nh_avg_active[-1]) * 100
+    )
+
+    print(f"Active cars difference (H - NoH): {final_active_diff:.2f}")
+    print(f"Cumulative arrivals difference (H - NoH): {final_arrival_diff:.2f}")
+    print(f"Average waiting steps difference (H - NoH): {final_waiting_diff:.2f}")
+    print(f"Efficiency with heuristics: {efficiency_h:.2f}%")
+    print(f"Efficiency without heuristics: {efficiency_nh:.2f}%")
+    print(f"Efficiency improvement: {efficiency_h - efficiency_nh:.2f}%")
+
+    return {
+        "heuristics": {
+            "avg_active_cars": h_avg_active,
+            "avg_cumulative_arrivals": h_avg_arrivals,
+            "avg_waiting_steps": h_avg_waiting,
+            "std_active_cars": h_std_active,
+            "std_cumulative_arrivals": h_std_arrivals,
+            "std_waiting_steps": h_std_waiting,
+        },
+        "no_heuristics": {
+            "avg_active_cars": nh_avg_active,
+            "avg_cumulative_arrivals": nh_avg_arrivals,
+            "avg_waiting_steps": nh_avg_waiting,
+            "std_active_cars": nh_std_active,
+            "std_cumulative_arrivals": nh_std_arrivals,
+            "std_waiting_steps": nh_std_waiting,
+        },
+    }
+
+
 def run_simulation_and_send_json():
     frames = []
     model = TrafficModel(params)
@@ -1296,6 +1199,13 @@ def run_simulation_and_send_json():
 if __name__ == "__main__":
     print("Traffic Simulation with Unity Integration")
     print("=" * 50)
+    print("Choose mode:")
+    print("1. Single simulation with Unity export")
+    print("2. Multiple runs with statistics and plots")
+    try:
+        mode_choice = input("Enter mode (1 or 2, default: 1): ").strip()
+    except EOFError:
+        mode_choice = "2"  # Default to multiple runs mode for testing
 
     # Get preset choice
     preset_choice = input("Choose traffic preset (1-3, default: 1): ").strip()
@@ -1306,10 +1216,38 @@ if __name__ == "__main__":
     elif preset_choice == "3":
         params["preset"] = "night"
     else:
-        print("invalid: usando mañana")
+        print("Invalid preset choice, using morning")
         params["preset"] = "morning"
 
-    run_simulation_and_send_json()
+    if mode_choice == "2":
+        # Multiple runs mode
+        try:
+            num_runs_input = input("Enter number of runs (default: 10): ").strip()
+            num_runs = int(num_runs_input) if num_runs_input else 10
+        except (ValueError, EOFError):
+            print("Using default: 10 runs")
+            num_runs = 10
 
-    if params["animation"]:
-        model, anim = run_simulation_with_animation("Traffic4.gif")
+        try:
+            steps_input = input("Enter steps per run (default: 100): ").strip()
+            steps = int(steps_input) if steps_input else 100
+        except (ValueError, EOFError):
+            print("Using default: 100 steps")
+            steps = 100
+
+        # Temporarily disable animation for multiple runs
+        original_animation = params["animation"]
+        params["animation"] = False
+
+        # Run multiple simulations
+        run_multiple_simulations_and_plot(num_runs, steps)
+
+        # Restore original animation setting
+        params["animation"] = original_animation
+
+    else:
+        # Single simulation mode (default)
+        run_simulation_and_send_json()
+
+        if params["animation"]:
+            model, anim = run_simulation_with_animation("Traffic4.gif")
