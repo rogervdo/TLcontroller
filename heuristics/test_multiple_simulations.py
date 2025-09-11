@@ -7,7 +7,7 @@ import sys
 
 sys.path.append("/Users/roger/Code/Clases/Multiagentes/ipynb")
 
-from reto6 import run_multiple_simulations_and_plot
+from heuristics.reto6 import run_multiple_simulations_and_plot
 
 
 def test_comparative_analysis():
@@ -15,7 +15,7 @@ def test_comparative_analysis():
     print("Testing comparative heuristics vs no heuristics analysis...")
 
     # Run comparative analysis with 3 runs and 50 steps each for quick testing
-    results = run_multiple_simulations_and_plot(num_runs=3, steps=200)
+    results = run_multiple_simulations_and_plot(num_runs=5, steps=300)
 
     print("\nComparative analysis completed successfully!")
     print("Results keys:", list(results.keys()))
