@@ -2,12 +2,19 @@ import agentpy as ap
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
-import matplotlib.animation as animation
 import random
 import heapq
 import socket
 import json
-from traffic_qlearning_mixin import QLearningTrafficMixin
+
+# Optional heuristics import
+try:
+    from traffic_heuristics import HeuristicsMixin
+
+    HEURISTICS_AVAILABLE = True
+except ImportError:
+    HEURISTICS_AVAILABLE = False
+    print("Warning: traffic_heuristics module not found. Running without heuristics.")
 
 """
 Traffic Simulation with Unity Integration
@@ -48,7 +55,7 @@ JSON Data Structure:
 
 # Simulation parameters
 params = {
-    "steps": 500,
+    "steps": 100,
     "spawn_rate": 1,  # Probability of spawning a car each step
     "world_size": 500,  # World boundaries (0 to world_size)
     "preset": "morning",  # Traffic preset: "morning", "evening", "night"
@@ -86,8 +93,6 @@ class Car(ap.Agent):
         self.path = []  # Will store the path as list of node IDs
         self.current_path_index = 0
         self.state = "moving"  # 'moving', 'arrived'
-        self.wait_steps = 0  # Track waiting time
-        self.spawn_time = self.model.t  # Track when car was spawned
 
         # Assign color based on spawn node
         spawn_colors = {
@@ -206,14 +211,12 @@ class Car(ap.Agent):
 
         # Check if next node is occupied
         if self.model.node_occupancy[next_node_id] is not None:
-            self.wait_steps += 1  # Increment wait time
             return  # Wait for the node to be free
 
         # Yield check for merge points
         for rule in self.model.yield_rules:
             if self.current_node_id == rule["yield"] and next_node_id == rule["merge"]:
                 if self.model.node_occupancy[rule["priority"]] is not None:
-                    self.wait_steps += 1  # Increment wait time
                     return  # Yield to priority car
 
         # Group check for stoplight functionality
@@ -229,7 +232,6 @@ class Car(ap.Agent):
             ]  # Example stoplight nodes
             if next_node_id in stoplight_nodes:
                 if current_node.group_id != self.model.active_group:
-                    self.wait_steps += 1  # Increment wait time
                     return  # Wait for green light
 
         # Move to next node instantly
@@ -573,7 +575,7 @@ class RoadNetwork:
                 self.nodes[node1].add_connection(node2, distance)
 
 
-class TrafficModel(ap.Model, QLearningTrafficMixin):
+class TrafficModelBase(ap.Model):
     """Main simulation model"""
 
     def setup(self):
@@ -590,11 +592,10 @@ class TrafficModel(ap.Model, QLearningTrafficMixin):
         # Statistics
         self.total_cars_spawned = 0
         self.total_cars_arrived = 0
-        self.completed_cars_wait_times = []  # Track wait times of completed cars
 
         # Traffic light state
         self.active_group = 0  # Start with group 0
-        self.group_cycle_steps = 10  # Switch every 10 steps
+        self.group_cycle_steps = 5  # Switch every 5 steps
 
         # Yield rules for merge points
         self.yield_rules = [
@@ -603,6 +604,61 @@ class TrafficModel(ap.Model, QLearningTrafficMixin):
             {"yield": "22_10", "merge": "22_12", "priority": "20_12"},
             {"yield": "10_7", "merge": "8_6", "priority": "8_8"},
         ]
+
+        # Nodes for heuristics-based traffic light control (organized by traffic light controllers)
+        self.group_nodes = {
+            0: [
+                # 8_18 controller and upstream
+                "8_18",
+                "8_20",
+                "8_22",
+                "8_24",
+                # 18_10 controller and upstream
+                "18_10",
+                "18_8",
+                "18_6",
+                "18_4",
+            ],
+            1: [
+                # 6_14 controller and upstream
+                "6_14",
+                "4_14",
+                "2_14",
+                "0_14",
+                # 6_12 controller and upstream
+                "6_12",
+                "4_12",
+                "2_12",
+                "0_12",
+                # 16_13 controller and upstream
+                "16_13",
+                "14_12",
+                "12_12",
+                "10_13",
+                # 16_11 controller and upstream
+                "16_11",
+                "14_10",
+                "12_10",
+                "10_11",
+            ],
+            2: [
+                # 20_15 controller and upstream
+                "20_15",
+                "22_15",
+                "24_15",
+                "26_15",
+                # 10_15 controller and upstream
+                "10_15",
+                "12_16",
+                "14_16",
+                "16_15",
+                # 10_17 controller and upstream
+                "10_17",
+                "12_18",
+                "14_18",
+                "16_17",
+            ],
+        }
 
         # Spawn-destination restrictions mapping with percentages
         # Define presets for different times of day
@@ -644,32 +700,14 @@ class TrafficModel(ap.Model, QLearningTrafficMixin):
         self.spawn_destinations = self.traffic_presets[preset_name]
         print(f"Using traffic preset: {preset_name}")
 
-        # Initialize Q-learning for adaptive traffic light control
-        self.init_qlearning(
-            alpha=0.1,  # Learning rate
-            gamma=0.95,  # Discount factor
-            epsilon=0.2,  # Initial exploration rate
-            epsilon_decay=0.995,  # Exploration decay
-            min_epsilon=0.05,  # Minimum exploration rate
-        )
-
     def step(self):
-        # Traffic light control - Q-learning has exclusive control when enabled
-        if (
-            self.t % 3 == 0 and self.t > 0
-        ):  # Make decisions every 3 steps (even more responsive)
-            if (
-                hasattr(self, "ql_enabled")
-                and self.ql_enabled
-                and hasattr(self, "ql_step")
-            ):
-                # Q-learning mode - exclusive control
-                self.ql_step()
-                # Q-learning handles all group switching decisions
-            else:
-                # Fixed-time mode only when Q-learning is explicitly disabled
-                self.active_group = (self.active_group + 1) % 3
-                print(f"Traffic light switched to Group {self.active_group}")
+        # Cycle traffic light groups every 5 steps
+        if self.t % self.group_cycle_steps == 0 and self.t > 0:
+            self.active_group = (self.active_group + 1) % 3
+            print(f"Traffic light switched to Group {self.active_group}")
+            # Adjust timer based on heuristics (if available)
+            if hasattr(self, "adjust_timer_based_on_traffic"):
+                self.adjust_timer_based_on_traffic()
 
         # Spawn new cars with restricted destinations
         if (
@@ -740,8 +778,6 @@ class TrafficModel(ap.Model, QLearningTrafficMixin):
             print(
                 f"Car completed journey: {car.path[0] if car.path else 'unknown'} → {car.target_node_id}"
             )
-            # Track wait time
-            self.completed_cars_wait_times.append(car.wait_steps)
             # Clear occupancy (safety check - should already be cleared when car arrived)
             if self.node_occupancy[car.current_node_id] == car.id:
                 self.node_occupancy[car.current_node_id] = None
@@ -755,6 +791,23 @@ class TrafficModel(ap.Model, QLearningTrafficMixin):
                 f"{self.total_cars_spawned} spawned, "
                 f"{self.total_cars_arrived} arrived"
             )
+
+
+# Function to create TrafficModel with optional heuristics
+def create_traffic_model_class(use_heuristics=True):
+    """Create TrafficModel class with or without heuristics"""
+    if use_heuristics and HEURISTICS_AVAILABLE:
+
+        class TrafficModelWithHeuristics(TrafficModelBase, HeuristicsMixin):
+            pass
+
+        return TrafficModelWithHeuristics
+    else:
+        return TrafficModelBase
+
+
+# Create the TrafficModel class
+TrafficModel = create_traffic_model_class(use_heuristics=HEURISTICS_AVAILABLE)
 
 
 def draw_simulation(model, ax):
@@ -958,30 +1011,25 @@ def draw_simulation(model, ax):
     ax.legend(handles=legend_elements, loc="upper right")
 
 
-def run_simulation_with_animation():
+def run_simulation_with_animation(filename="Traffic4.gif"):
     """Run the simulation with animation"""
     model = TrafficModel(params)
-    model.setup()  # Initialize the model
-    model.t = 0  # Start at time 0
 
     # Create animation
     fig, ax = plt.subplots(figsize=(10, 10))
 
-    def animate_step(frame):
-        # Run one step of the simulation
-        if frame > 0:
-            model.t = frame
-            model.step()
-        # Draw the current state
+    def animate_step(model, ax):
         draw_simulation(model, ax)
-        return []
 
-    # Create animation using matplotlib's FuncAnimation
-    anim = animation.FuncAnimation(
-        fig, animate_step, frames=params["steps"], interval=200, blit=False
-    )
+    # Run with animation
+    animation = ap.animate(model, fig, ax, animate_step)
 
-    return model, anim
+    # Save animation with specified filename
+    if params["animation"]:
+        animation.save(filename, writer="pillow", fps=5)
+        print(f"Animation saved as '{filename}'")
+
+    return model, animation
 
 
 class TCPSender:
@@ -1089,27 +1137,5 @@ if __name__ == "__main__":
 
     run_simulation_and_send_json()
 
-    print(f"Animation parameter: {params['animation']}")
     if params["animation"]:
-        print("Creating animation...")
-        try:
-            model, anim = run_simulation_with_animation()
-            print("Saving animation to Traffic4.gif...")
-            # Try different writers in order of preference
-            writers = ["pillow", "imagemagick", "ffmpeg"]
-            saved = False
-            for writer in writers:
-                try:
-                    anim.save("Traffic4.gif", writer=writer, fps=5)
-                    print(f"Animation saved successfully using {writer}!")
-                    saved = True
-                    break
-                except Exception as e:
-                    print(f"Failed with {writer}: {e}")
-                    continue
-            if not saved:
-                print("All animation writers failed. Animation not saved.")
-        except Exception as e:
-            print(f"Error creating/saving animation: {e}")
-    else:
-        print("Animation is disabled (animation=False)")
+        model, anim = run_simulation_with_animation("Traffic4.gif")
