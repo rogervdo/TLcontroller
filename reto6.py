@@ -11,7 +11,7 @@ import json
 try:
     from traffic_heuristics import HeuristicsMixin
 
-    HEURISTICS_AVAILABLE = True
+    HEURISTICS_AVAILABLE = True  # Temporarily disabled for testing
 except ImportError:
     HEURISTICS_AVAILABLE = False
     print("Warning: traffic_heuristics module not found. Running without heuristics.")
@@ -194,6 +194,59 @@ class Car(ap.Agent):
         path.reverse()
         return path
 
+    def find_alternative_path(self, blocked_node_id):
+        """Find alternative path avoiding a blocked node"""
+        network = self.model.road_network
+        start = self.current_node_id
+        goal = self.target_node_id
+
+        # Priority queue for open set: (f_score, node_id)
+        open_set = []
+        heapq.heappush(open_set, (0, start))
+
+        # Came from dictionary to reconstruct path
+        came_from = {}
+
+        # g_score: cost from start to current node
+        g_score = {node_id: float("inf") for node_id in network.nodes}
+        g_score[start] = 0
+
+        # f_score: estimated total cost from start to goal through current node
+        f_score = {node_id: float("inf") for node_id in network.nodes}
+        f_score[start] = self.heuristic(start, goal)
+
+        while open_set:
+            # Get node with lowest f_score
+            current_f, current = heapq.heappop(open_set)
+
+            if current == goal:
+                # Reconstruct path
+                return self.reconstruct_path(came_from, current)
+
+            # Check all neighbors (excluding the blocked node)
+            for neighbor in network.nodes[current].connected_nodes:
+                if neighbor == blocked_node_id:
+                    continue  # Skip the blocked node
+
+                # Calculate tentative g_score
+                edge_distance = network.nodes[current].connected_nodes[neighbor]
+                tentative_g_score = g_score[current] + edge_distance
+
+                if tentative_g_score < g_score[neighbor]:
+                    # This path to neighbor is better than any previous one
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g_score
+                    f_score[neighbor] = tentative_g_score + self.heuristic(
+                        neighbor, goal
+                    )
+
+                    # Add to open set if not already there
+                    if neighbor not in [item[1] for item in open_set]:
+                        heapq.heappush(open_set, (f_score[neighbor], neighbor))
+
+        # No path found
+        return []
+
     def step(self):
         if self.state == "arrived" or not self.path:
             return
@@ -211,7 +264,32 @@ class Car(ap.Agent):
 
         # Check if next node is occupied
         if self.model.node_occupancy[next_node_id] is not None:
-            return  # Wait for the node to be free
+            # Check if we're currently on a traffic light node
+            stoplight_nodes = [
+                "8_16",
+                "8_14",
+                "8_12",
+                "18_16",
+                "18_14",
+                "18_12",
+                "8_15",
+            ]
+            if self.current_node_id in stoplight_nodes:
+                # Try to find an alternative route avoiding the blocked node
+                alternative_path = self.find_alternative_path(next_node_id)
+                if alternative_path and len(alternative_path) > 1:
+                    print(
+                        f"Car {self.id} found alternative route around blocked node {next_node_id}"
+                    )
+                    self.path = alternative_path
+                    self.current_path_index = 0
+                    # Recalculate next node after path change
+                    next_node_id = self.path[self.current_path_index + 1]
+                    next_node = self.model.road_network.nodes[next_node_id]
+                else:
+                    return  # No alternative route found, wait
+            else:
+                return  # Not on traffic light, wait for node to be free
 
         # Yield check for merge points
         for rule in self.model.yield_rules:
@@ -224,6 +302,7 @@ class Car(ap.Agent):
         if current_node.group_id is not None:
             stoplight_nodes = [
                 "8_16",
+                "8_15",
                 "8_14",
                 "8_12",
                 "18_16",
@@ -234,11 +313,19 @@ class Car(ap.Agent):
                 if current_node.group_id != self.model.active_group:
                     return  # Wait for green light
 
+                # Additional congestion check - even if it's our turn, check for congestion ahead
+                if self.model.check_congestion_ahead(
+                    self.current_node_id, next_node_id
+                ):
+                    return  # Wait due to congestion ahead
+
         # Move to next node instantly
         self.position = next_node.get_position().copy()
         # Update occupancy
         self.model.node_occupancy[self.current_node_id] = None
         self.model.node_occupancy[next_node_id] = self.id
+        # Reset wait time for the node we're leaving (car successfully moved)
+        self.model.node_wait_times[self.current_node_id] = 0
         self.current_node_id = next_node_id
         self.current_path_index += 1
 
@@ -285,6 +372,7 @@ class RoadNetwork:
             "8_10": (47, 51),
             "8_12": (47, 83),
             "8_14": (48, 117),
+            "8_15": (49, 150),
             "8_16": (49, 175),
             "8_18": (50, 200),
             "8_20": (49.6, 244),
@@ -297,8 +385,8 @@ class RoadNetwork:
             "18_8": (173, -3),
             "18_10": (172, 36.9),
             "18_12": (171, 57),
-            "18_14": (170.8, 74),
-            "18_16": (173, 150),
+            "18_14": (170.8, 79),
+            "18_16": (173, 140),
             "18_18": (172, 196),
             "18_20": (172.7, 244),
             "18_22": (170, 307),
@@ -320,13 +408,13 @@ class RoadNetwork:
             "26_15": (327, 85),
             "24_15": (295, 99),
             "22_15": (261, 118),
-            "20_15": (223, 135),
+            "20_15": (223, 125),
             "10_13": (72.3, 87),
             "12_12": (94.2, 78),
             "14_12": (126, 71.9),
             "16_13": (150, 73.1),
             "6_16": (9.2, 181.7),
-            "2_16": (-65, 203),
+            "2_16": (-65, 193),
             "20_12": (214, 52.7),
             "22_12": (256, 36.6),
             "24_12": (285.6, 23.5),
@@ -361,6 +449,9 @@ class RoadNetwork:
             "22_6": (240, -73),
             "22_8": (241, -12),
             "22_10": (249, 19),
+            "6_15": (7, 180),
+            "4_15": (-20, 175),
+            "18_17": (178, 160),
         }
         nodes_list = [
             ("8_2", "destination", None),
@@ -370,6 +461,7 @@ class RoadNetwork:
             ("8_10", "intersection", None),
             ("8_12", "intersection", None),
             ("8_14", "intersection", None),
+            ("8_15", "intersection", None),
             ("8_16", "intersection", None),
             ("8_18", "intersection", 0),
             ("8_20", "intersection", None),
@@ -452,6 +544,9 @@ class RoadNetwork:
             ("22_8", "intersection", None),
             ("22_10", "intersection", None),
             ("22_12", "intersection", None),
+            ("6_15", "intersection", None),
+            ("4_15", "intersection", None),
+            ("18_17", "intersection", None),
         ]
         for node_id, node_type, group_id in nodes_list:
             x, y = positions[node_id]
@@ -467,7 +562,11 @@ class RoadNetwork:
             ("8_12", "10_11"),  # 8,12 > 10,11 (to roundabout)
             ("8_12", "8_10"),
             ("8_14", "8_12"),  # 8,14 > 8,12
-            ("8_16", "8_14"),  # 8,16 > 8,14
+            ("8_16", "8_15"),  # 8,16 > 8,14
+            ("8_15", "8_14"),
+            ("8_15", "6_15"),
+            ("6_15", "4_15"),
+            ("4_15", "2_16"),
             ("8_18", "8_16"),  # 8,18 > 8,16
             ("8_20", "8_18"),  # 8,20 > 8,18
             ("8_22", "8_20"),  # 8,22 > 8,20
@@ -481,8 +580,8 @@ class RoadNetwork:
             ("18_10", "18_12"),  # 18,10 > 18,12
             ("18_12", "18_14"),  # 18,12 > 18,14
             ("18_14", "18_16"),  # 18,14 > 18,16
-            ("18_16", "16_17"),  # 18,16 > 16,17 (to roundabout)
-            ("18_16", "18_18"),  # 18,16 > 18,18 (alternative)
+            ("18_16", "16_15"),  # 18,16 > 16,17 (to roundabout)
+            ("18_16", "18_17"),  # 18,16 > 18,18 (alternative)
             ("18_18", "18_20"),  # 18,18 > 18,20
             ("18_20", "18_22"),  # 18,20 > 18,22
             ("18_22", "18_24"),  # 18,22 > 18,24
@@ -549,10 +648,9 @@ class RoadNetwork:
             ("16_15", "14_16"),
             ("14_16", "12_16"),
             ("12_16", "10_15"),
-            ("10_15", "8_14"),
+            ("10_15", "8_15"),
             # Connection from existing node
-            ("18_14", "16_15"),
-            ("20_15", "18_14"),
+            ("20_15", "18_17"),
             # New connections for user request
             ("6_9", "6_7"),
             ("6_7", "6_5"),
@@ -563,6 +661,8 @@ class RoadNetwork:
             ("22_6", "22_8"),
             ("22_8", "22_10"),
             ("22_10", "22_12"),
+            ("18_17", "16_17"),
+            ("18_17", "18_18"),
         ]
 
         # Add all connections as directed edges
@@ -586,6 +686,9 @@ class TrafficModelBase(ap.Model):
         # Initialize node occupancy
         self.node_occupancy = {node_id: None for node_id in self.road_network.nodes}
 
+        # Track how long cars have been waiting at each node (for congestion detection)
+        self.node_wait_times = {node_id: 0 for node_id in self.road_network.nodes}
+
         # Initialize car list
         self.cars = ap.AgentList(self, 0, Car)
 
@@ -596,6 +699,7 @@ class TrafficModelBase(ap.Model):
         # Traffic light state
         self.active_group = 0  # Start with group 0
         self.group_cycle_steps = 5  # Switch every 5 steps
+        self.traffic_light_counter = 0  # Counter for regular traffic light changes
 
         # Yield rules for merge points
         self.yield_rules = [
@@ -701,13 +805,23 @@ class TrafficModelBase(ap.Model):
         print(f"Using traffic preset: {preset_name}")
 
     def step(self):
-        # Cycle traffic light groups every 5 steps
-        if self.t % self.group_cycle_steps == 0 and self.t > 0:
-            self.active_group = (self.active_group + 1) % 3
-            print(f"Traffic light switched to Group {self.active_group}")
-            # Adjust timer based on heuristics (if available)
-            if hasattr(self, "adjust_timer_based_on_traffic"):
-                self.adjust_timer_based_on_traffic()
+        # Increment traffic light counter for regular timing
+        self.traffic_light_counter += 1
+
+        # Handle traffic light group changes differently based on heuristics availability
+        if not HEURISTICS_AVAILABLE:
+            # No heuristics: Change groups every 5 steps (fixed timer)
+            if self.traffic_light_counter % 5 == 0:
+                self.active_group = (self.active_group + 1) % 3
+                print(f"Traffic light switched to Group {self.active_group}")
+        else:
+            # Heuristics available: Use adaptive timer controlled by heuristics
+            if self.traffic_light_counter % self.group_cycle_steps == 0:
+                self.active_group = (self.active_group + 1) % 3
+                print(f"Traffic light switched to Group {self.active_group}")
+                # Adjust timer based on heuristics
+                if hasattr(self, "adjust_timer_based_on_traffic"):
+                    self.adjust_timer_based_on_traffic()
 
         # Spawn new cars with restricted destinations
         if (
@@ -781,8 +895,19 @@ class TrafficModelBase(ap.Model):
             # Clear occupancy (safety check - should already be cleared when car arrived)
             if self.node_occupancy[car.current_node_id] == car.id:
                 self.node_occupancy[car.current_node_id] = None
+                # Reset wait time when car arrives at destination
+                self.node_wait_times[car.current_node_id] = 0
             self.cars.remove(car)
             self.total_cars_arrived += 1
+
+        # Update node wait times for congestion detection
+        for node_id in self.node_occupancy:
+            if self.node_occupancy[node_id] is not None:
+                # Node is occupied, increment wait time
+                self.node_wait_times[node_id] += 1
+            else:
+                # Node is free, reset wait time
+                self.node_wait_times[node_id] = 0
 
         # Print statistics every 100 steps
         if self.t % 100 == 0 and self.t > 0:
@@ -791,6 +916,46 @@ class TrafficModelBase(ap.Model):
                 f"{self.total_cars_spawned} spawned, "
                 f"{self.total_cars_arrived} arrived"
             )
+
+    def check_congestion_ahead(self, current_node_id, next_node_id):
+        """Check if specified nodes ahead are occupied"""
+        # Define specific congestion check mappings: current_node -> nodes_to_check
+        # Each traffic light node checks specific downstream nodes for congestion
+        congestion_check_nodes = {
+            # Group 1 traffic lights - check roundabout entries and other intersections
+            "6_14": ["12_12", "16_13", "8_14"],  # 8_14 checks both roundabout entries
+            "6_12": ["10_11", "16_11", "8_12"],  # 8_12 checks both roundabout entries
+            # Additional mappings for better congestion control
+            "20_15": ["16_15", "16_17"],  # Roundabout internal checks
+        }
+
+        # Get the nodes to check for this specific current node
+        check_nodes = congestion_check_nodes.get(current_node_id, [])
+
+        # If no specific mapping found, try group-specific mappings for nodes that appear in multiple groups
+        if not check_nodes:
+            current_node = self.road_network.nodes.get(current_node_id)
+            if current_node and current_node.group_id is not None:
+                group_specific_mappings = {
+                    ("8_16", 2): ["10_15"],  # 8_16 in group 2
+                    ("18_16", 2): ["10_17"],  # 18_16 in group 2
+                }
+                check_nodes = group_specific_mappings.get(
+                    (current_node_id, current_node.group_id), []
+                )
+
+        # Check if ALL of the critical nodes are occupied
+        if check_nodes:
+            all_occupied = True
+            for node_id in check_nodes:
+                if self.node_occupancy.get(node_id) is None:
+                    all_occupied = False
+                    break
+
+            if all_occupied:
+                return True  # Congestion detected - ALL nodes occupied
+
+        return False  # No congestion
 
 
 # Function to create TrafficModel with optional heuristics
@@ -820,7 +985,16 @@ def draw_simulation(model, ax):
     ax.set_title(f"Node-Based Traffic Simulation - Step {model.t}")
 
     # Draw network nodes
-    stoplight_nodes = ["8_16", "8_14", "8_12", "18_16", "18_14", "18_12"]
+    stoplight_nodes = [
+        "8_16",
+        "8_14",
+        "8_12",
+        "18_16",
+        "18_14",
+        "18_12",
+        "8_15",
+        "18_17",
+    ]
     group_colors = {0: "orange", 1: "purple", 2: "cyan"}
     for node_id, node in model.road_network.nodes.items():
         if node_id in stoplight_nodes:
